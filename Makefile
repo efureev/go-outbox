@@ -21,7 +21,7 @@ LDFLAGS := -s -w \
 	-X 'main.date=$(BUILD_DATE)'
 
 .DEFAULT_GOAL := help
-.PHONY: help build run test test-integration test-all bench bench-throughput bench-latency cover lint fmt tidy up down logs psql image clean
+.PHONY: help build run test test-integration test-all bench bench-throughput bench-latency cover lint lint-host fmt fmt-host tidy up down logs psql image clean clean-cache
 
 help: ## List the available targets
 	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z_-]+:.*?## / {printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -56,10 +56,27 @@ cover: ## Run every test with coverage
 		-coverprofile=$(COVERAGE) $(PKG) ./test/integration/...
 	go tool cover -func=$(COVERAGE) | tail -1
 
-lint: ## Run the linter
+# Both run in the container pinned in docker-compose.yml, so a developer and CI
+# see the same findings. --user keeps anything written to the working tree —
+# formatted files, caches — owned by the caller rather than by root.
+# Outside the repository, so nothing that walks the working tree trips over
+# third-party sources. Created here rather than by Docker, which would make it
+# root-owned on Linux.
+LINT_CACHE ?= $(HOME)/.cache/go-outbox-lint
+export LINT_CACHE
+
+LINT_RUN = @mkdir -p "$(LINT_CACHE)" && docker compose run --rm --user "$(shell id -u):$(shell id -g)" lint
+
+lint: ## Run the linter, pinned to the CI version
+	$(LINT_RUN) golangci-lint run
+
+lint-host: ## Run the linter from PATH (faster; may differ from CI)
 	golangci-lint run
 
-fmt: ## Format the code
+fmt: ## Format the code, pinned to the CI version
+	$(LINT_RUN) golangci-lint fmt
+
+fmt-host: ## Format the code using the toolchain on PATH
 	gofmt -w -s .
 
 tidy: ## Tidy the module
@@ -93,3 +110,6 @@ image: ## Build the container image
 
 clean: ## Remove build artefacts
 	rm -rf bin $(COVERAGE)
+
+clean-cache: ## Remove the lint container's caches
+	rm -rf "$(LINT_CACHE)"

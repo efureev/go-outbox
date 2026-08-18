@@ -57,7 +57,15 @@ type Conn struct {
 	current *connection
 
 	closeOnce sync.Once
-	closed    chan struct{}
+	// ctx bounds the supervisor's lifetime, and Close is what ends it.
+	//
+	// It is derived from the caller's context with context.WithoutCancel: the
+	// supervisor keeps the connection alive for as long as the publisher exists
+	// and must not be torn down when the context that established the first
+	// connection is done — but a trace or a request id on that context is still
+	// worth carrying into a reconnection an hour later.
+	ctx    context.Context
+	cancel context.CancelFunc
 	// redial carries a request to rebuild the connection. It is buffered so a
 	// failing publish can signal without blocking on the supervisor.
 	redial chan struct{}
@@ -69,21 +77,23 @@ type Conn struct {
 
 // Dial establishes the initial connection and starts the supervisor.
 func Dial(ctx context.Context, cfg *config.RabbitMQDriver, log *slog.Logger) (*Conn, error) {
+	supervisorCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
+
 	c := &Conn{
 		cfg:    cfg,
 		log:    log,
-		closed: make(chan struct{}),
+		ctx:    supervisorCtx,
+		cancel: cancel,
 		redial: make(chan struct{}, 1),
 	}
 
 	if err := c.connect(ctx); err != nil {
+		cancel()
+
 		return nil, err
 	}
 
-	// The supervisor outlives this call: it has to keep redialling long after
-	// the context that established the first connection is done.
-	//nolint:contextcheck // reconnection is not bounded by the startup context
-	go c.supervise()
+	go c.supervise(supervisorCtx)
 
 	return c, nil
 }
@@ -156,10 +166,10 @@ func (c *Conn) requestRedial() {
 
 // supervise rebuilds the connection whenever it drops, backing off between
 // attempts so a broker that is down is not hammered.
-func (c *Conn) supervise() {
+func (c *Conn) supervise(ctx context.Context) {
 	for {
 		select {
-		case <-c.closed:
+		case <-ctx.Done():
 			return
 		case <-c.redial:
 		}
@@ -167,13 +177,13 @@ func (c *Conn) supervise() {
 		delay := c.cfg.ReconnectDelay
 		for {
 			select {
-			case <-c.closed:
+			case <-ctx.Done():
 				return
 			case <-time.After(delay):
 			}
 
-			ctx, cancel := context.WithTimeout(context.Background(), c.cfg.PublishTimeout)
-			err := c.connect(ctx)
+			attemptCtx, cancel := context.WithTimeout(ctx, c.cfg.PublishTimeout)
+			err := c.connect(attemptCtx)
 			cancel()
 
 			if err == nil {
@@ -224,7 +234,7 @@ func (c *Conn) Close(context.Context) error {
 	var err error
 
 	c.closeOnce.Do(func() {
-		close(c.closed)
+		c.cancel()
 
 		c.mu.Lock()
 		conn := c.current

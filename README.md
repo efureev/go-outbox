@@ -147,8 +147,15 @@ make up                 # start PostgreSQL, RabbitMQ and Redpanda
 make test               # unit tests
 make test-integration   # integration tests against the real thing
 make bench              # the numbers quoted in the changelog
-make lint
+make lint               # golangci-lint, in a container pinned to the CI version
+make fmt
 ```
+
+`lint` and `fmt` run in a container rather than against whatever is on `PATH`,
+because a linter that differs between a developer's machine and CI reports
+different things — and the way that shows up is a green local run turning into a
+red pipeline. `make lint-host` uses the binary on `PATH` when a faster loop
+matters more than matching CI exactly.
 
 The integration tests carry the weight of the suite on purpose: this is a set of
 concurrency and ownership rules expressed in SQL, and those cannot be checked by

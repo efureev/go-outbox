@@ -50,5 +50,35 @@ services:
       timeout: 5s
       retries: 20
 
+  # Linting and formatting, pinned to the golangci-lint the CI job installs.
+  #
+  # It is a container rather than a note in the README because a linter that
+  # differs between a developer's machine and CI reports different things, and
+  # the way that surfaces is a green local run turning into a red pipeline. Keep
+  # this tag and the one in .github/workflows/test.yml the same.
+  #
+  # Not started by `docker compose up`: it is a one-shot command, driven by
+  # `make lint` and `make fmt`.
+  #
+  # The caches sit outside the repository, in a host directory the Makefile
+  # creates before mounting it. Inside the working tree they would be picked up
+  # by anything that walks it — `gofmt -l .` reporting third-party sources as
+  # unformatted — and a named volume would be created root-owned and so
+  # unwritable once the container drops to the calling user.
+  lint:
+    image: golangci/golangci-lint:v2.12-alpine
+    working_dir: /app
+    environment:
+      GOFLAGS: -buildvcs=false
+      GOCACHE: /cache/go-build
+      GOMODCACHE: /cache/go-mod
+      GOLANGCI_LINT_CACHE: /cache/golangci-lint
+    volumes:
+      - .:/app
+      - ${LINT_CACHE:-${HOME}/.cache/go-outbox-lint}:/cache
+    profiles:
+      - tools
+    command: golangci-lint run
+
 volumes:
   postgres-data: {}
