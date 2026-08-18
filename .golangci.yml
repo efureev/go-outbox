@@ -1,0 +1,83 @@
+version: "2"
+
+run:
+  tests: true
+  timeout: 5m
+  build-tags:
+    - integration
+
+linters:
+  default: none
+  enable:
+    - bodyclose
+    - contextcheck
+    - copyloopvar
+    - durationcheck
+    - errcheck
+    - errorlint
+    - exhaustive
+    - gocheckcompilerdirectives
+    - gochecknoinits
+    - gocritic
+    - gosec
+    - govet
+    - ineffassign
+    - intrange
+    - makezero
+    - misspell
+    - nakedret
+    - nilerr
+    - noctx
+    - nolintlint
+    - perfsprint
+    - predeclared
+    - promlinter
+    - reassign
+    - revive
+    - rowserrcheck
+    - sqlclosecheck
+    - staticcheck
+    - testifylint
+    - unconvert
+    - unparam
+    - unused
+    - usestdlibvars
+    - wastedassign
+    - whitespace
+
+  settings:
+    exhaustive:
+      default-signifies-exhaustive: true
+    gosec:
+      excludes:
+        # Schema and table names reach SQL by interpolation because a
+        # placeholder cannot stand in for an identifier. Both are validated
+        # against a strict pattern in config.Validate before they get here.
+        - G201
+        - G202
+    revive:
+      rules:
+        - name: exported
+          disabled: true
+
+  exclusions:
+    presets:
+      - comments
+      - common-false-positives
+      - std-error-handling
+    rules:
+      # Tests reach for fixtures and assertions that would be noise elsewhere.
+      - path: _test\.go
+        linters:
+          - errcheck
+          - gosec
+          - noctx
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
+  settings:
+    goimports:
+      local-prefixes:
+        - github.com/efureev/go-outbox

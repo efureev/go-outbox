@@ -1,0 +1,5 @@
+/bin/
+/coverage.out
+/.env
+/.idea/
+/tmp/
