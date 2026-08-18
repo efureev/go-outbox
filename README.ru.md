@@ -152,6 +152,7 @@ SELECT outbox.requeue(ARRAY['…']::uuid[]);
 make up                 # поднять PostgreSQL, RabbitMQ и Redpanda
 make test               # юнит-тесты
 make test-integration   # интеграционные тесты на реальной инфраструктуре
+make bench              # цифры, приведённые в changelog
 make lint
 ```
 

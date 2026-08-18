@@ -12,7 +12,7 @@ import (
 	"github.com/efureev/go-outbox/pkg/outboxclient"
 )
 
-func newClient(t *testing.T, f *fixture) *outboxclient.Client {
+func newClient(t testing.TB, f *fixture) *outboxclient.Client {
 	t.Helper()
 
 	c, err := outboxclient.New(f.Schema, "messages")

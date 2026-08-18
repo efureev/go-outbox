@@ -75,14 +75,18 @@ so it stays on one replica per cycle however many are running.
 
 The knobs, in the order worth reaching for:
 
-1. **`OUTBOX_DISPATCH_WORKERS`** — publish concurrency per stream. The first
-   thing to raise when the broker is not saturated but `outbox_batch_size` sits
-   at the maximum. For RabbitMQ, raise `CHANNELS` with it: workers past the
-   channel pool only queue for a channel, and throughput comes back down.
+1. **`OUTBOX_DISPATCH_WORKERS`** together with the driver's channel pool.
+   Throughput is bounded by whichever of the two is smaller, so raising one
+   alone does nothing: eight workers over the default four RabbitMQ channels
+   performs the same as four over four, while widening the pool to match moves
+   it by around 60%. Raise `WORKERS` and `CHANNELS` together, or neither.
 2. **`OUTBOX_DISPATCH_BATCH_SIZE`** — messages per claim. Larger amortises the
    claim across more messages; too large and a batch stops fitting inside the
    lease.
 3. **Replicas** — when one process cannot keep up, or for availability.
+
+`make bench` sweeps all three against a local stack, which is the way to find
+where the limit sits on your own hardware rather than on someone else's.
 
 Raising `WORKERS` or `BATCH_SIZE` lengthens a batch, so keep
 `OUTBOX_DISPATCH_LEASE_TTL` comfortably above the time one takes.

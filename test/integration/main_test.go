@@ -75,7 +75,7 @@ type fixture struct {
 }
 
 // newFixture creates a schema, migrates it and registers its teardown.
-func newFixture(t *testing.T) *fixture {
+func newFixture(t testing.TB) *fixture {
 	t.Helper()
 
 	schema := fmt.Sprintf("outbox_test_%d_%d", os.Getpid(), schemaCounter.Add(1))
@@ -125,7 +125,7 @@ func baseConfig(schema string) config.Config {
 	return cfg
 }
 
-func migrateFixture(t *testing.T, cfg config.Config) {
+func migrateFixture(t testing.TB, cfg config.Config) {
 	t.Helper()
 
 	conn := rawConn(t, cfg)
@@ -146,7 +146,7 @@ func migrateOptions(cfg config.Config) migrate.Options {
 }
 
 // rawConn opens a standalone connection, closed when the test ends.
-func rawConn(t *testing.T, cfg config.Config) *pgx.Conn {
+func rawConn(t testing.TB, cfg config.Config) *pgx.Conn {
 	t.Helper()
 
 	conn, err := pgx.Connect(t.Context(), cfg.DB.DSN)

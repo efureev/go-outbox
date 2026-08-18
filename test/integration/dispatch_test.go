@@ -34,7 +34,7 @@ type harness struct {
 
 // newHarness wires the real store, the real broker driver and the real bus.
 // Only the message contents are invented.
-func newHarness(t *testing.T, tune ...string) *harness {
+func newHarness(t testing.TB, tune ...string) *harness {
 	t.Helper()
 
 	f := newFixture(t)
@@ -232,7 +232,7 @@ func (ghostRouter) Publish(_ context.Context, _ string, msgs []core.Message) []e
 
 func (ghostRouter) DriverFor(string) (string, bool) { return "", false }
 
-func mustConfig(t *testing.T, f *fixture) config.Config {
+func mustConfig(t testing.TB, f *fixture) config.Config {
 	t.Helper()
 
 	cfg, err := config.LoadFrom(env(t,
@@ -290,7 +290,7 @@ func (f flakyRouter) Publish(_ context.Context, _ string, msgs []core.Message) [
 func (flakyRouter) DriverFor(string) (string, bool) { return "rmq", true }
 
 // waitFor polls a condition until it holds or the deadline passes.
-func waitFor(t *testing.T, within time.Duration, cond func() bool, what string) {
+func waitFor(t testing.TB, within time.Duration, cond func() bool, what string) {
 	t.Helper()
 
 	deadline := time.Now().Add(within)

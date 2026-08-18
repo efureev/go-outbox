@@ -39,7 +39,7 @@ func kafkaBrokers() []string {
 
 // rabbitDriver builds a driver configuration through the public loader, so the
 // tests exercise the same parsing production uses.
-func rabbitDriver(t *testing.T, extra ...string) *config.RabbitMQDriver {
+func rabbitDriver(t testing.TB, extra ...string) *config.RabbitMQDriver {
 	t.Helper()
 
 	pairs := append([]string{
@@ -64,7 +64,7 @@ func rabbitDriver(t *testing.T, extra ...string) *config.RabbitMQDriver {
 	return d
 }
 
-func kafkaDriver(t *testing.T, extra ...string) *config.KafkaDriver {
+func kafkaDriver(t testing.TB, extra ...string) *config.KafkaDriver {
 	t.Helper()
 
 	pairs := append([]string{
@@ -373,7 +373,7 @@ func (stubPublisher) Close(context.Context) error       { return nil }
 
 // declareQueue creates a queue up front, for tests where the publisher must not
 // create it itself.
-func declareQueue(t *testing.T, queue string) {
+func declareQueue(t testing.TB, queue string) {
 	t.Helper()
 
 	conn, err := amqp.Dial(amqpDSN())
@@ -395,7 +395,7 @@ func declareQueue(t *testing.T, queue string) {
 
 // consumeOne reads a single message from a queue, declaring it if needed so the
 // test does not depend on the publisher having declared it.
-func consumeOne(t *testing.T, queue string) amqp.Delivery {
+func consumeOne(t testing.TB, queue string) amqp.Delivery {
 	t.Helper()
 
 	conn, err := amqp.Dial(amqpDSN())
@@ -431,7 +431,7 @@ func consumeOne(t *testing.T, queue string) amqp.Delivery {
 	return amqp.Delivery{}
 }
 
-func consumeKafka(t *testing.T, topic string, want int) []segmentio.Message {
+func consumeKafka(t testing.TB, topic string, want int) []segmentio.Message {
 	t.Helper()
 
 	reader := segmentio.NewReader(segmentio.ReaderConfig{

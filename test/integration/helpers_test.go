@@ -20,7 +20,7 @@ import (
 
 // seed writes messages exactly as a producer would: the public columns only,
 // with every dispatcher-owned column left to its default.
-func (f *fixture) seed(t *testing.T, stream string, n int) []string {
+func (f *fixture) seed(t testing.TB, stream string, n int) []string {
 	t.Helper()
 
 	ids := make([]string, n)
@@ -31,7 +31,7 @@ func (f *fixture) seed(t *testing.T, stream string, n int) []string {
 	return ids
 }
 
-func (f *fixture) insert(t *testing.T, stream, topic string, payload []byte, target *core.Target) string {
+func (f *fixture) insert(t testing.TB, stream, topic string, payload []byte, target *core.Target) string {
 	t.Helper()
 
 	id := uuid.NewString()
@@ -74,7 +74,7 @@ type row struct {
 	Dispatched  *time.Time
 }
 
-func (f *fixture) row(t *testing.T, id string) row {
+func (f *fixture) row(t testing.TB, id string) row {
 	t.Helper()
 
 	var r row
@@ -91,7 +91,7 @@ func (f *fixture) row(t *testing.T, id string) row {
 
 // expire forces a lease to look overdue, standing in for a worker that died
 // after claiming.
-func (f *fixture) expire(t *testing.T, ids ...string) {
+func (f *fixture) expire(t testing.TB, ids ...string) {
 	t.Helper()
 
 	_, err := f.Pool.Exec(t.Context(), fmt.Sprintf(
@@ -103,7 +103,7 @@ func (f *fixture) expire(t *testing.T, ids ...string) {
 
 // countByStatus is used where a test cares about totals rather than individual
 // rows.
-func (f *fixture) countByStatus(t *testing.T, status core.Status) int {
+func (f *fixture) countByStatus(t testing.TB, status core.Status) int {
 	t.Helper()
 
 	var n int
@@ -127,7 +127,7 @@ func ids(messages []core.Message) []string {
 
 // env builds a configuration source from key=value pairs, so a test never
 // depends on the process environment.
-func env(t *testing.T, kv ...string) *envi.Env {
+func env(t testing.TB, kv ...string) *envi.Env {
 	t.Helper()
 
 	e := envi.New()
@@ -153,7 +153,7 @@ func newID() string { return uuid.NewString() }
 // notifyWait bounds how long a test waits for a NOTIFY to arrive.
 const notifyWait = 5 * time.Second
 
-func mustContext(t *testing.T, d time.Duration) context.Context {
+func mustContext(t testing.TB, d time.Duration) context.Context {
 	t.Helper()
 
 	ctx, cancel := context.WithTimeout(t.Context(), d)

@@ -264,7 +264,7 @@ func (r *statsRecorder) count() int {
 	return len(r.samples)
 }
 
-func scaleConfig(t *testing.T, f *fixture) config.Config {
+func scaleConfig(t testing.TB, f *fixture) config.Config {
 	t.Helper()
 
 	cfg, err := config.LoadFrom(env(t,

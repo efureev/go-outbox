@@ -146,6 +146,7 @@ Metrics and starting alert rules: [docs/MetricsAndAlerts.md](docs/MetricsAndAler
 make up                 # start PostgreSQL, RabbitMQ and Redpanda
 make test               # unit tests
 make test-integration   # integration tests against the real thing
+make bench              # the numbers quoted in the changelog
 make lint
 ```
 

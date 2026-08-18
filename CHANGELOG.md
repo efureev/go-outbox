@@ -93,20 +93,30 @@ acknowledges it, and any number of replicas may run against one table.
 
 ### Performance
 
-Measured on a local development stack — PostgreSQL and RabbitMQ in Docker on one machine, publisher
-confirms on, batches of 200 — so these are the shape of the numbers rather than a capacity plan.
-Throughput is the drain alone, with the connection and the schema already paid for.
+From `make bench` — PostgreSQL and RabbitMQ in Docker on one machine, Go 1.26, Apple M5 Pro,
+batches of 200, medians of three runs. Compare runs on one machine rather than reading the absolute
+figures as a capacity plan.
 
 | | Result |
 |---|---|
-| Sustained delivery, one pipeline, 1 worker | ~3 400 msg/s |
-| Sustained delivery, one pipeline, 4 workers | ~7 800 msg/s |
-| Insert to broker, notifications enabled | ~59 ms |
-| Claims per burst of 200 inserts | 2–3 |
+| Drain, dispatcher and PostgreSQL only | ~46 000 msg/s |
+| Drain via RabbitMQ, 4 workers over 4 channels | ~7 300 msg/s |
+| Drain via RabbitMQ, 8 workers over 8 channels | ~12 000 msg/s |
+| Insert to broker, shipped defaults | ~105 ms |
+| Insert to broker, debounce and jitter minimised | ~5 ms |
 
-Workers past the driver's channel pool do not help: at eight workers against the default four
-RabbitMQ channels the figure comes back down, because the extra workers only queue for a channel.
-Raise `CHANNELS` alongside `WORKERS`, or leave both alone.
+Two things the sweeps say that are worth carrying into a deployment.
+
+**Throughput is bounded by the smaller of the worker count and the driver's channel pool.** Eight
+workers over the default four channels performs the same as four workers over four; widening the
+pool to match moves it by around 60%. Raise `WORKERS` and `CHANNELS` together or neither. Without a
+broker in the way the dispatcher itself never becomes the limit, so what is being tuned is the
+publish path, not this process.
+
+**Latency at the defaults is the debounce window plus the mean of the replica jitter**, and both
+are deliberate: they turn a burst of inserts into a couple of claims and keep replicas from all
+waking at the same millisecond. Trading them away takes delivery to roughly five milliseconds, at
+the cost of both properties.
 
 ### Requirements
 

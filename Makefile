@@ -3,6 +3,13 @@ SHELL := /bin/sh
 BIN        ?= bin/outbox
 PKG        ?= ./...
 COVERAGE   ?= coverage.out
+# Fixed counts rather than durations: the harness would otherwise spend the ramp
+# rebuilding fixtures for tiny values of b.N. The two suites need very different
+# counts — a throughput iteration is one message among thousands in flight, a
+# latency iteration is one message waited on from end to end.
+BENCHTIME     ?= 3000x
+BENCHLATENCY  ?= 200x
+BENCHCOUNT    ?= 3
 VERSION    ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 COMMIT     ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo none)
 BUILD_DATE ?= $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
@@ -14,7 +21,7 @@ LDFLAGS := -s -w \
 	-X 'main.date=$(BUILD_DATE)'
 
 .DEFAULT_GOAL := help
-.PHONY: help build run test test-integration test-all cover lint fmt tidy up down logs psql image clean
+.PHONY: help build run test test-integration test-all bench bench-throughput bench-latency cover lint fmt tidy up down logs psql image clean
 
 help: ## List the available targets
 	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z_-]+:.*?## / {printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -32,6 +39,16 @@ test-integration: ## Run the integration tests (needs `make up`)
 	go test -race -tags integration -timeout 10m ./test/integration/...
 
 test-all: test test-integration ## Run every test
+
+bench: bench-throughput bench-latency ## Run every benchmark (needs `make up`)
+
+bench-throughput: ## Benchmark sustained delivery
+	go test -tags integration -run '^$$' -bench 'BenchmarkDrain' \
+		-benchtime $(BENCHTIME) -count $(BENCHCOUNT) -timeout 60m ./test/integration/...
+
+bench-latency: ## Benchmark insert-to-broker latency
+	go test -tags integration -run '^$$' -bench 'BenchmarkNotifyLatency' \
+		-benchtime $(BENCHLATENCY) -count $(BENCHCOUNT) -timeout 60m ./test/integration/...
 
 cover: ## Run every test with coverage
 	go test -race -tags integration -timeout 10m -covermode=atomic \
