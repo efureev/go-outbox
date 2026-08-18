@@ -18,9 +18,9 @@ import (
 
 // dispatchModule runs one pipeline per configured stream.
 //
-// Separate pipelines are the point. The previous version processed every stream
-// in one batch and published serially, so a broker that was down did not just
-// delay its own messages — everything claimed behind them waited too.
+// Separate pipelines are the point. Processing every stream in one batch means
+// a broker that is down does not merely delay its own messages: everything
+// claimed behind them waits too.
 type dispatchModule struct {
 	*appmod.BaseAppModule
 

@@ -64,10 +64,9 @@ curl -X POST -H "Authorization: Bearer $TOKEN" \
 ```
 
 Do not write your own UPDATE. Requeueing has to reset the attempt counter and
-the availability time together with the status, and a partial version of it
-produces a row that is pending and will never be selected. That is not
-hypothetical: it is what the previous version's documentation instructed
-consumers to do.
+the availability time together with the status; a partial version of it produces
+a row that is nominally pending and will never be selected again, which is a
+much quieter failure than an error would have been.
 
 ### 1.3 Columns the dispatcher owns
 

@@ -3,10 +3,9 @@
 // Package integration exercises the dispatcher against real infrastructure.
 //
 // It carries the weight of the test suite on purpose. The product is a set of
-// concurrency and ownership rules expressed in SQL, and those rules cannot be
-// checked by asserting that a query string has not changed — which is what the
-// previous version's repository tests did, through a mock that matched SQL text.
-// Every claim below runs against PostgreSQL.
+// concurrency and ownership rules expressed in SQL, and a mock that matches
+// query text can only assert that the SQL has not changed — not that it is
+// right. Every claim below runs against PostgreSQL.
 //
 // Run with:
 //

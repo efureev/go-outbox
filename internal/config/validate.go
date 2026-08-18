@@ -108,8 +108,8 @@ func (c Config) validateDispatch(add func(string, ...any)) {
 	if d.Workers < 1 {
 		add("OUTBOX_DISPATCH_WORKERS must be at least 1, got %d", d.Workers)
 	}
-	// A max-attempts of zero made the previous version's SQL read
-	// "retry_count >= -1", which is true for every row: every message failed
+	// A max-attempts of zero would make the comparison in the failure path read
+	// "attempts >= -1", which holds for every row: every message would fail
 	// permanently on its first error.
 	if d.MaxAttempts < 1 {
 		add("OUTBOX_DISPATCH_MAX_ATTEMPTS must be at least 1, got %d", d.MaxAttempts)

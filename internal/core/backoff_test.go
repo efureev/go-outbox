@@ -18,7 +18,7 @@ func TestBackoffGrowsExponentially(t *testing.T) {
 }
 
 // Without a ceiling, doubling a one-minute base passes a day by the eleventh
-// attempt and a year not much later. The previous version had no cap at all.
+// attempt and a year not much later.
 func TestBackoffIsCapped(t *testing.T) {
 	p := BackoffPolicy{Base: time.Minute, Max: time.Hour}
 

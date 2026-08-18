@@ -145,7 +145,6 @@ SELECT outbox.requeue(ARRAY['…']::uuid[]);
 - [Метрики и алерты](docs/MetricsAndAlerts.ru.md).
 - [Эксплуатация](docs/Operations.ru.md) — развёртывание, масштабирование и что
   делать, когда что-то пошло не так.
-- [Переезд с v2](docs/Migration-v2.ru.md) — что изменилось и почему.
 
 ## Разработка
 

@@ -56,10 +56,9 @@ COMMENT ON TABLE @schema@.@table@ IS
 -- Claim path. The index carries exactly the predicate and the ordering the
 -- claim query uses, and covers only pending rows.
 --
--- The previous version selected pending and stale-processing rows in one
--- statement joined by OR, so the planner had to combine two partial indexes
--- and sort the result — the opposite of what the comment above that query
--- claimed. Reclaiming is a separate concern here, with its own index below.
+-- Selecting pending and stale-processing rows in one statement joined by OR
+-- would force the planner to combine two partial indexes and sort the result.
+-- Reclaiming is a separate concern here, with its own index below.
 CREATE INDEX IF NOT EXISTS @table@_claim_idx
     ON @schema@.@table@ (stream, available_at, id)
     WHERE status = 0;
@@ -68,8 +67,8 @@ CREATE INDEX IF NOT EXISTS @table@_claim_idx
 -- it makes both "how many are waiting" and "how long has the oldest waited"
 -- index-only, and the second is O(1) because created_at leads. That metric is
 -- the clearest signal that delivery is falling behind, so it has to be cheap
--- enough to sample every half minute. The previous version answered the same
--- question with a GROUP BY over the entire table on every poll iteration.
+-- enough to sample every half minute — which a GROUP BY over the whole table
+-- is not.
 CREATE INDEX IF NOT EXISTS @table@_pending_age_idx
     ON @schema@.@table@ (created_at)
     WHERE status = 0;

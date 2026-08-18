@@ -4,9 +4,8 @@
 //
 // The rule that runs through every write is lease ownership. A claim stamps a
 // row with a token; every statement that finalizes a row requires that token to
-// match. It is what makes running several replicas safe, and its absence is the
-// defect that made the previous version unsafe to scale despite claiming
-// otherwise in its own documentation.
+// match. It is what makes running several replicas safe — without it, claiming
+// concurrently is safe but recording the outcome is not.
 package store
 
 import (

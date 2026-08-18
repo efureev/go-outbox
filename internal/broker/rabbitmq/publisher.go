@@ -33,8 +33,8 @@ func New(ctx context.Context, cfg *config.RabbitMQDriver, log *slog.Logger) (*Pu
 //
 // Messages go one at a time — AMQP has no batch publish — but they go through
 // a pool of channels, so the dispatcher's workers publish concurrently instead
-// of queueing behind one channel and one mutex, which is what capped the
-// previous version's throughput.
+// of queueing behind one channel and one mutex, which would cap throughput
+// however many workers were configured.
 func (p *Publisher) Publish(ctx context.Context, msgs []core.Message) []error {
 	results := make([]error, len(msgs))
 
@@ -122,9 +122,9 @@ func (p *Publisher) declare(ch *publishChannel, queue string) error {
 
 // publishing builds the AMQP message.
 //
-// MessageId carries the outbox row id. The previous version sent none, while
-// its own documentation required consumers to deduplicate — leaving them to
-// find an identifier inside a payload the dispatcher treats as opaque bytes.
+// MessageId carries the outbox row id. Delivery is at-least-once, so consumers
+// have to deduplicate; without an identifier in the properties they would have
+// to find one inside a payload this dispatcher treats as opaque bytes.
 func (p *Publisher) publishing(msg core.Message) amqp.Publishing {
 	pub := amqp.Publishing{
 		MessageId:    msg.ID,

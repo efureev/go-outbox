@@ -181,10 +181,10 @@ func TestAckMarksDelivered(t *testing.T) {
 
 // The regression that matters most.
 //
-// The previous version wrote outcomes back with "WHERE id = ANY($ids)" and no
-// ownership check. An instance whose lease had expired mid-flight would then
-// overwrite the status of a row another replica had already reclaimed and
-// delivered — resurrecting a delivered message and republishing it, forever.
+// Writing outcomes back with "WHERE id = ANY($ids)" and no ownership check lets
+// an instance whose lease expired mid-flight overwrite the status of a row
+// another replica has already reclaimed and delivered — resurrecting a
+// delivered message and republishing it, indefinitely.
 func TestExpiredLeaseCannotOverwriteAnotherInstancesResult(t *testing.T) {
 	f := newFixture(t)
 	f.seed(t, "local", 1)
@@ -387,12 +387,12 @@ func TestPermanentFailureSkipsTheRetryBudget(t *testing.T) {
 	}
 }
 
-// The regression on the documented recovery procedure.
+// The regression on the recovery path.
 //
-// The previous version told consumers to run an UPDATE that set status back to
-// pending and cleared last_try_at. That message was never selected again: the
-// transition to failed had also set next_retry_at to NULL, and the claim query
-// required it to be non-null. The retry counter was left at its maximum too.
+// Requeueing has to reset the attempt counter and the availability time along
+// with the status. An UPDATE that changes only the status leaves a row that is
+// nominally pending, is never selected by the claim query again, and still
+// carries an exhausted attempt counter.
 func TestRequeueMakesAFailedMessageDeliverableAgain(t *testing.T) {
 	f := newFixture(t)
 	f.seed(t, "local", 1)
@@ -429,7 +429,7 @@ func TestRequeueMakesAFailedMessageDeliverableAgain(t *testing.T) {
 		t.Errorf("attempts = %d, want the counter reset so the message gets a real second chance", r.Attempts)
 	}
 
-	// The part the previous version got wrong: it has to be claimable.
+	// The part that is easy to get wrong: it has to be claimable again.
 	again, err := f.Store.Claim(t.Context(), "local", 10, lease("a", time.Minute))
 	if err != nil {
 		t.Fatalf("claim after requeue: %v", err)

@@ -1,10 +1,9 @@
 // Package logging builds the application logger.
 //
 // reggol is confined to this package: everything else in the program takes a
-// *slog.Logger. That keeps the logging library out of the domain packages —
-// the previous version threaded a vendor-specific logger interface through
-// every constructor, which is most of why it could not be lifted out of its
-// original repository — and it is what appmod and msghub accept anyway.
+// *slog.Logger. That keeps the logging library out of the domain packages,
+// which would otherwise carry a vendor-specific logger interface through every
+// constructor — and *slog.Logger is what appmod and msghub accept anyway.
 package logging
 
 import (

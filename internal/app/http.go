@@ -14,9 +14,8 @@ import (
 
 // httpModule serves the operational endpoints.
 //
-// It is net/http and nothing else. The endpoints below are a handful of
-// routes; the previous version pulled in gin, a router package, a transport
-// package and a healthcheck package to serve them.
+// It is net/http and nothing else: the endpoints below are a handful of routes,
+// which ServeMux has been able to express since patterns gained methods.
 type httpModule struct {
 	*appmod.BaseAppModule
 
@@ -87,9 +86,9 @@ func (m *httpModule) routes() http.Handler {
 	mux.HandleFunc("GET /api/v1/messages/failed", m.handleListFailed)
 
 	// The mutating endpoint exists only when there is a token to guard it. An
-	// admin API reachable by anything that can route to the pod is worse than
-	// no admin API, and the previous version shipped its pprof endpoints behind
-	// a default secret of "secret", which amounts to the same thing.
+	// admin API reachable by anything that can route to the pod is worse than no
+	// admin API — and so is one behind a default token, which is the same thing
+	// with extra steps.
 	if m.cfg.HTTP.AdminToken != "" {
 		mux.HandleFunc("POST /api/v1/messages/requeue",
 			requireToken(m.cfg.HTTP.AdminToken, m.handleRequeue))

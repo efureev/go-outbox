@@ -1,20 +1,17 @@
 -- Returning a failed message to the queue.
 --
--- The previous version documented this as a raw UPDATE the consumer was to run
--- by hand:
+-- The obvious hand-written version of this is wrong in two ways at once:
 --
---     UPDATE tech.outbox_messages
---     SET status = 'pending', last_try_at = NULL
---     WHERE id = $1 AND status = 'failed';
+--     UPDATE outbox.messages
+--     SET status = 0
+--     WHERE id = $1 AND status = 3;
 --
--- It did not work. Moving a message to failed also set next_retry_at to NULL,
--- and the claim query required next_retry_at IS NOT NULL, so a message
--- rehabilitated by the documented procedure was never selected again. The
--- retry counter was left at its maximum too, so even with that fixed the
--- message would fail again on its first error.
+-- The row keeps an available_at from whenever it last failed and an attempts
+-- counter already at the maximum, so it is either never claimed again or fails
+-- for good on its first error. Both have to be reset along with the status.
 --
--- Shipping the operation as a function removes both traps: there is one
--- correct way to do it and it is not a snippet in a document.
+-- Shipping the operation as a function removes both traps: there is one correct
+-- way to do it, and it is not a snippet in a document for everyone to copy.
 
 CREATE OR REPLACE FUNCTION @schema@.requeue(p_ids UUID[])
     RETURNS SETOF UUID

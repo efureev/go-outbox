@@ -77,7 +77,8 @@ The knobs, in the order worth reaching for:
 
 1. **`OUTBOX_DISPATCH_WORKERS`** — publish concurrency per stream. The first
    thing to raise when the broker is not saturated but `outbox_batch_size` sits
-   at the maximum.
+   at the maximum. For RabbitMQ, raise `CHANNELS` with it: workers past the
+   channel pool only queue for a channel, and throughput comes back down.
 2. **`OUTBOX_DISPATCH_BATCH_SIZE`** — messages per claim. Larger amortises the
    claim across more messages; too large and a batch stops fitting inside the
    lease.

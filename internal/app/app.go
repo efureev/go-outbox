@@ -5,9 +5,8 @@
 //
 // There is no dependency-injection container. appmod's Registry carries the
 // handful of contracts modules share, and the wiring below is the whole
-// composition root — readable top to bottom, unlike the previous version's
-// list of fx providers whose order and resolvability were implicit (two of
-// which, as it turned out, could not be resolved at all).
+// composition root: readable top to bottom, with every dependency stated rather
+// than resolved by a graph nobody can see.
 package app
 
 import (

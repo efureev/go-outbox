@@ -1,11 +1,11 @@
 // Package observability holds the Prometheus metric set.
 //
-// Two things distinguish it from the previous version's. The metrics live on an
-// explicit registry passed in by the caller rather than on promauto globals
-// registered at init, so a test can build its own and read it back. And the
-// label values are bounded by the configuration: a stream name arrives from a
-// row a producer wrote, and letting it become a label value lets a producer
-// mint unbounded time series.
+// Two properties are deliberate. The metrics live on an explicit registry
+// passed in by the caller rather than on promauto globals registered at init,
+// so a test can build its own and read it back. And the label values are
+// bounded by the configuration: a stream name arrives from a row a producer
+// wrote, and letting it become a label value unchecked lets a producer mint
+// unbounded time series.
 package observability
 
 import (
@@ -54,8 +54,8 @@ type Metrics struct {
 	// LeaseConflicts counts write-backs that matched fewer rows than they were
 	// given, meaning another replica had already reclaimed the lease. It should
 	// sit at zero; a rising value means the lease is shorter than the time a
-	// batch actually takes, which is exactly the condition that let the
-	// previous version overwrite a delivered message's status.
+	// batch actually takes, which is the condition under which a message is
+	// published twice.
 	LeaseConflicts *prometheus.CounterVec
 
 	DLQPublished *prometheus.CounterVec
@@ -67,9 +67,8 @@ type Metrics struct {
 	ReclaimedAge      *prometheus.HistogramVec
 
 	// OldestPendingAge is the age of the oldest undelivered message. It is the
-	// single most useful backlog signal — a count says how much is waiting, this
-	// says how long the oldest has waited — and the previous version had no
-	// equivalent.
+	// single most useful backlog signal: a count says how much is waiting, this
+	// says how long the oldest has waited.
 	OldestPendingAge prometheus.Gauge
 	MessagesByStatus *prometheus.GaugeVec
 

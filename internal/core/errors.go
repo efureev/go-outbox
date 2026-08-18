@@ -7,9 +7,9 @@ import (
 
 // PermanentError marks a publish failure that retrying cannot fix. The
 // dispatcher sends such a message straight to StatusFailed instead of spending
-// the whole attempt budget on it — the previous version retried an unroutable
-// message or an unknown stream five times, each time with a longer backoff,
-// before reaching the same conclusion.
+// the whole attempt budget on it: retrying an unroutable message or an unknown
+// stream five times, each after a longer backoff, reaches the same conclusion
+// an hour later.
 //
 // Permanent, in practice: an unknown stream or driver, a broker rejecting the
 // payload as too large, an unroutable publish (RabbitMQ basic.return), an

@@ -11,9 +11,9 @@ import "embed"
 // FS holds every migration, named <version>_<name>.sql.
 //
 // Files are immutable once released. The runner records a checksum of each and
-// refuses to continue when one changes: the previous version edited its initial
-// migration after the fact, so a fresh install and an upgraded install ended up
-// with different schemas and nothing detected it.
+// refuses to continue when one changes: editing a released migration leaves a
+// fresh install and an upgraded install with different schemas, and nothing
+// else would detect it.
 //
 //go:embed *.sql
 var FS embed.FS

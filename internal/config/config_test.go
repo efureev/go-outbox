@@ -69,10 +69,10 @@ func TestLoadFromParsesDurationsAtLoadTime(t *testing.T) {
 	}
 }
 
-// The previous version collected driver settings by string prefix, so the
-// driver "rmq" absorbed every OUTBOX_DRIVER_RMQ_LOCAL_* variable, passed its
-// "is this configured" check on the strength of them, and failed later with an
-// unrelated message. Both drivers must now read exactly their own settings.
+// Collecting driver settings by string prefix would let the driver "rmq" absorb
+// every OUTBOX_DRIVER_RMQ_LOCAL_* variable, pass its "is this configured" check
+// on the strength of them, and fail later with an unrelated message. Each driver
+// must read exactly its own settings.
 func TestDriverNamesSharingAPrefixStaySeparate(t *testing.T) {
 	cfg, err := LoadFrom(env(t,
 		"OUTBOX_DB_USER=outbox",

@@ -19,10 +19,10 @@ import (
 // metricsModule owns the Prometheus registry and the listener that exposes it.
 //
 // The registry is an explicit value passed to whoever records into it, not the
-// package-level default. The previous version declared its metrics as
-// promauto globals, which registered into the default registry at init: shared
-// mutable state that made tests order-dependent and left every metric
-// registered whether or not the feature that fed it was enabled.
+// package-level default. Declaring metrics as promauto globals registers them
+// into the default registry at init: shared mutable state that makes tests
+// order-dependent and leaves every metric registered whether or not the feature
+// feeding it is enabled.
 type metricsModule struct {
 	*appmod.BaseAppModule
 

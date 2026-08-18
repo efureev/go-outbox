@@ -40,10 +40,10 @@ func newQueries(schema, table string) queries {
 // FOR UPDATE SKIP LOCKED is what makes several replicas safe: two instances
 // polling at the same instant take disjoint batches instead of colliding.
 //
-// Only pending rows are considered. The previous version selected pending and
-// stale-processing rows in one statement joined by OR, which forced the planner
-// to combine two partial indexes and sort the result; reclaiming expired leases
-// is a separate operation here, with its own index and its own metric.
+// Only pending rows are considered. Selecting pending and stale-processing rows
+// in one statement joined by OR forces the planner to combine two partial
+// indexes and sort the result; reclaiming expired leases is a separate
+// operation here, with its own index and its own metric.
 const claimSQL = `
 WITH due AS (
     SELECT id
@@ -66,15 +66,15 @@ RETURNING m.id, m.stream, m.topic, m.payload, m.headers, m.target, m.attempts, m
 
 // ackSQL records a delivery.
 //
-// The lease_token predicate is the fix for the defect that made the previous
-// version unsafe to scale: without it, an instance whose lease had expired
-// mid-flight would happily overwrite the status of a row another replica had
-// already reclaimed and delivered — resurrecting a delivered message, or
-// marking a message sent while someone else was still publishing it.
+// The lease_token predicate is what makes running several replicas safe:
+// without it, an instance whose lease had expired mid-flight would overwrite the
+// status of a row another replica had already reclaimed and delivered —
+// resurrecting a delivered message, or marking one sent while someone else was
+// still publishing it.
 //
 // The lag is computed from the database clock alone. Measuring it as
-// time.Since(created_at) in the process, as the previous version did, folds the
-// clock difference between the application and the database into the metric.
+// time.Since(created_at) in the process would fold the clock difference between
+// the application and the database into the metric.
 const ackSQL = `
 UPDATE %[1]s
    SET status        = 2,
@@ -117,9 +117,7 @@ UPDATE %[1]s m
 RETURNING m.id, m.stream, m.status, m.attempts`
 
 // releaseLeaseSQL hands unfinished claims back on a clean shutdown, so another
-// replica picks them up immediately instead of waiting out the lease. The
-// previous version simply exited, leaving its claims stuck for the whole
-// processing timeout.
+// replica picks them up immediately instead of waiting out the lease.
 const releaseLeaseSQL = `
 UPDATE %[1]s
    SET status       = 0,
@@ -167,10 +165,9 @@ RETURNING expired.id, expired.stream, coalesce(expired.owner, ''),
 //
 // Three scalar sub-queries, each answered by its own partial index, and a
 // min() over the pending-age index that stops at the first entry. Nothing here
-// touches a delivered row — those are counted by outbox_messages_dispatched_total.
-// The previous version ran GROUP BY status across the whole table on every poll
-// iteration, which becomes a sequential scan over millions of delivered rows
-// every few seconds.
+// touches a delivered row — those are counted by
+// outbox_messages_dispatched_total. A GROUP BY status across the whole table
+// would be a sequential scan over every delivered row ever written.
 const statsSQL = `
 SELECT
     (SELECT count(*) FROM %[1]s WHERE status = 0),
@@ -210,8 +207,9 @@ SELECT id, stream, topic, payload, headers, target, attempts, created_at
 // requeueSQL and requeueBeforeSQL call the functions shipped with the
 // migrations rather than repeating their bodies. The operation exists as a
 // database function so that an operator working in psql, the admin endpoint and
-// the CLI all take the same path — the previous version documented a raw UPDATE
-// for consumers to run by hand, and that UPDATE did not work.
+// the CLI all take the same path: it has to reset the attempt counter and the
+// availability time along with the status, and a hand-written UPDATE that
+// changes only the status produces a row that is never selected again.
 const requeueSQL = `SELECT * FROM %[1]s.requeue($1::uuid[])`
 
 const requeueBeforeSQL = `SELECT * FROM %[1]s.requeue_failed_before($1, $2)`

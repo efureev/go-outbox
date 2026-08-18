@@ -95,13 +95,13 @@ type RabbitMQDriver struct {
 	naming Naming
 
 	DSN string
-	// Channels is the size of the publish channel pool. The previous version
-	// serialised every publish through one channel behind a mutex, which put a
-	// hard ceiling on throughput no amount of workers could lift.
+	// Channels is the size of the publish channel pool. A single channel behind
+	// a mutex serialises every publish and puts a ceiling on throughput that no
+	// number of workers can lift.
 	Channels int
-	// Declare makes the publisher declare a queue before publishing to it.
-	// Off by default: broker topology belongs to whoever owns the broker, and
-	// the previous version paid a QueueDeclare round-trip on every message.
+	// Declare makes the publisher declare a queue before publishing to it. Off
+	// by default: broker topology belongs to whoever owns the broker, and the
+	// declaration costs a round trip the publish path does not need.
 	Declare bool
 	// Mandatory asks the broker to return an unroutable message instead of
 	// silently discarding it, which turns a misrouted publish into a visible
@@ -151,10 +151,10 @@ const (
 )
 
 // Keys understood inside a DRIVER_<NAME>_ namespace. Lookup is exact and the
-// set is closed: the previous version matched by string prefix, so the driver
-// "rmq" quietly absorbed every variable belonging to "rmq_local", passed its
-// "is this driver configured" check on the strength of them, and then failed
-// with an unrelated message.
+// set is closed. Matching by string prefix instead would let the driver "rmq"
+// absorb every variable belonging to "rmq_local", pass its "is this driver
+// configured" check on the strength of them, and then fail with an unrelated
+// message.
 var (
 	commonDriverKeys = []string{"TYPE", "PREFIX", "PREFIX_SEP", "VERSION_SEP"}
 
@@ -170,8 +170,8 @@ var (
 )
 
 // Default separators. Kafka names are conventionally dotted, AMQP queue names
-// underscored; the previous version's 2.5/2.6 releases settled on these and
-// changing them again would be a breaking change for no gain.
+// underscored. Changing either renames every topic a consumer subscribes to, so
+// they are settled rather than tunable-by-default.
 const (
 	defaultRabbitPrefixSep  = "_"
 	defaultRabbitVersionSep = "_"
@@ -193,10 +193,10 @@ func loadBrokers(src Source) (BrokerConfig, error) {
 	driverNames := make([]string, 0, len(names))
 
 	for _, name := range names {
-		// Streams are matched case-insensitively at publish time, so the name
-		// is normalised once, here. The previous version normalised in one
-		// place and not the other, which surfaced as an empty driver label on
-		// every metric for a stream written in mixed case.
+		// Streams are matched case-insensitively at publish time, so the name is
+		// normalised once, here. Normalising in one place and not the other
+		// surfaces as an empty driver label on every metric for a stream written
+		// in mixed case — a symptom well removed from its cause.
 		stream := strings.ToLower(name)
 
 		key := fmt.Sprintf(streamPrefixFmt, envToken(stream)) + "DRIVER"

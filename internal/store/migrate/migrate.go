@@ -2,10 +2,9 @@
 //
 // It is deliberately small: forward-only, one transaction per file, a recorded
 // checksum per file, and an advisory lock around the whole run so that N
-// replicas starting at the same moment do not race. The previous version had no
-// runner and no schema-version table at all; migrations were applied by hand or
-// by a docker-entrypoint script, and a file was edited after release without
-// anything noticing.
+// replicas starting at the same moment do not race. The checksum is what makes
+// an edited file an error rather than a silent divergence between a fresh
+// install and an upgraded one.
 package migrate
 
 import (

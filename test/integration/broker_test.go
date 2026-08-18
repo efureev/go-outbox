@@ -162,17 +162,18 @@ func TestRabbitMQUnroutableMessageIsPermanent(t *testing.T) {
 	}
 }
 
-// The defect this replaces: the previous version shared one confirmation
-// channel across every publish and read a single value after each. A publish
-// that timed out left its confirmation queued, and the next message consumed
-// it — reporting success for a message the broker had never confirmed.
+// The defect this guards against: sharing one confirmation channel across every
+// publish and reading a single value after each. A publish that times out leaves
+// its confirmation queued, and the next message consumes it — reporting success
+// for a message the broker never confirmed.
 //
-// Here each publish waits on its own deferred confirmation, so a batch of
+// Each publish waits on its own deferred confirmation instead, so a batch of
 // messages published back to back is confirmed one for one.
 func TestRabbitMQConfirmationsAreNotCrossed(t *testing.T) {
-	// One channel, so every publish shares the confirmation stream that the
-	// previous version got wrong. Declaration stays off: the publisher must not
-	// create the queue the middle message is meant to miss.
+	// One channel, so every publish shares a single confirmation stream — the
+	// arrangement in which crossed confirmations would show up. Declaration
+	// stays off: the publisher must not create the queue the middle message is
+	// meant to miss.
 	driver := rabbitDriver(t, "OUTBOX_DRIVER_RMQ_CHANNELS=1")
 
 	p, err := rabbitmq.New(t.Context(), driver, logging.Nop())

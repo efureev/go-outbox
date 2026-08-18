@@ -144,11 +144,11 @@ type requeueRequest struct {
 
 // handleRequeue returns failed messages to the queue.
 //
-// This is the operation the previous version documented as a raw UPDATE for
-// consumers to run themselves — an UPDATE that did not work, because the
-// transition to failed had cleared the column the claim query required. Making
-// it an endpoint over a database function leaves one correct implementation
-// instead of a snippet everyone copies.
+// It has to reset the attempt counter and the availability time along with the
+// status; a version that changes only the status leaves a row that is nominally
+// pending and will never be selected again. Exposing it as an endpoint over a
+// database function leaves one correct implementation instead of a snippet
+// everyone copies and half of them get wrong.
 func (m *httpModule) handleRequeue(w http.ResponseWriter, r *http.Request) {
 	if m.store == nil {
 		writeError(w, http.StatusServiceUnavailable, "the store is not available yet")

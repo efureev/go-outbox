@@ -1,10 +1,9 @@
 // Package dispatch is the dispatcher's core loop: claim a batch, publish it,
 // write the outcome back.
 //
-// One pipeline runs per stream. That is the fix for a structural problem in the
-// previous version, which processed every stream in one batch and published
-// them one at a time in order: a broker that was down did not merely delay its
-// own messages, it held up everything claimed behind them.
+// One pipeline runs per stream. Processing every stream in one batch and
+// publishing serially would mean a broker that is down does not merely delay
+// its own messages: it holds up everything claimed behind them.
 package dispatch
 
 import (
@@ -104,10 +103,9 @@ func (p *Pipeline) Wake() {
 // Run drives the pipeline until ctx is canceled.
 //
 // The loop is adaptive: a full batch means there is a backlog, so the next
-// iteration starts at once rather than sleeping out the poll interval. The
-// previous version always waited, which capped throughput at batch size divided
-// by poll interval — a hundred messages every ten seconds, whatever the
-// hardware underneath.
+// iteration starts at once rather than sleeping out the poll interval. Always
+// waiting would cap throughput at batch size divided by poll interval — a fixed
+// number of messages per tick, whatever the hardware underneath.
 func (p *Pipeline) Run(ctx context.Context) error {
 	ticker := time.NewTicker(p.cfg.PollInterval)
 	defer ticker.Stop()
@@ -163,9 +161,9 @@ func (p *Pipeline) RunOnce(ctx context.Context) (int, error) {
 	ev.Publishes = publishes
 
 	// A shutdown that interrupts publishing leaves the untried tail claimed.
-	// Handing it back explicitly means another replica picks it up now, rather
-	// than after the lease expires — the previous version simply exited, and
-	// its claims sat idle for the whole processing timeout.
+	// Handing it back explicitly means another replica picks it up now rather
+	// than after the lease expires; simply exiting would leave those rows idle
+	// for the whole lease.
 	if attempted < len(messages) {
 		released, err := p.release(ctx, messages[attempted:], lease.Token)
 		if err != nil {

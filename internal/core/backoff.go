@@ -8,7 +8,7 @@ import (
 
 // BackoffPolicy schedules the next attempt after a retryable failure.
 //
-// Two properties the previous version lacked:
+// Two properties are easy to leave out and expensive to be without:
 //
 //   - a ceiling. Unbounded doubling of a 60s base reaches days by the tenth
 //     attempt, long after anyone would consider the message live.

@@ -9,8 +9,8 @@ import (
 )
 
 // Status is the lifecycle state of an outbox row. It is stored as a SMALLINT
-// rather than the VARCHAR(255) the previous version used: the set is closed,
-// and a CHECK constraint keeps it that way.
+// with a CHECK constraint rather than as text: the set is closed, and the
+// schema should say so.
 type Status int16
 
 const (
@@ -55,8 +55,8 @@ type Message struct {
 	Attempts int
 
 	// CreatedAt is read back from the database so delivery lag is measured
-	// against the database clock rather than this process's clock — the two
-	// disagree, and the previous version's lag metric absorbed the difference.
+	// against the database clock rather than this process's. The two disagree,
+	// and a lag metric that spans both absorbs the difference silently.
 	CreatedAt time.Time
 }
 
@@ -71,8 +71,8 @@ type Target struct {
 	// it versioned the row rather than the topic name.
 	Version int `json:"version,omitempty"`
 	// Exchange and RoutingKey are RabbitMQ-only. Empty Exchange means the
-	// default exchange, and an empty RoutingKey means the topic name — which
-	// together reproduce the previous version's behaviour.
+	// default exchange, and an empty RoutingKey means the topic name, so a
+	// message that says nothing about routing still goes somewhere sensible.
 	Exchange   string `json:"exchange,omitempty"`
 	RoutingKey string `json:"routing_key,omitempty"`
 }

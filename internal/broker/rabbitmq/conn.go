@@ -1,25 +1,24 @@
 // Package rabbitmq publishes through AMQP 0-9-1.
 //
-// Three things here differ from the previous version, and each was a defect
-// rather than a preference:
+// Three decisions here are worth stating, because the obvious alternative to
+// each is wrong rather than merely slower:
 //
 //   - Confirmations are per message, through the deferred confirmation the
-//     client library returns from a publish. The previous version shared one
-//     NotifyPublish channel across every publish and read a single value after
-//     each one. When a publish timed out, its confirmation stayed in the
-//     channel and the *next* message read it — and was marked delivered
-//     without the broker ever having confirmed it. That is message loss, and it
-//     is silent.
+//     client library returns from a publish. Sharing one NotifyPublish channel
+//     across every publish and reading a single value after each looks
+//     equivalent and is not: when a publish times out its confirmation stays
+//     in the channel, and the *next* message reads it — and is marked
+//     delivered without the broker ever having confirmed it. That is silent
+//     message loss.
 //
-//   - The connection is supervised. The previous version tested
-//     "connection == nil" to decide whether to reconnect, and that field never
-//     became nil once set, so a connection closed by the broker was never
-//     noticed; recovery happened only as a side effect of a queue declaration
-//     failing.
+//   - The connection is supervised through NotifyClose. Testing whether the
+//     connection field is nil does not work: it never becomes nil once set, so
+//     a connection closed by the broker goes unnoticed and recovery happens
+//     only as a side effect of some later operation failing.
 //
 //   - Queues are declared at most once per name, and not at all by default.
-//     The previous version declared on every single publish, paying a round
-//     trip per message for topology that belongs to whoever owns the broker.
+//     Declaring on every publish costs a round trip per message for topology
+//     that belongs to whoever owns the broker.
 package rabbitmq
 
 import (
@@ -126,8 +125,8 @@ func (c *Conn) connect(ctx context.Context) error {
 	c.current = &connection{conn: conn, channels: channels, all: all}
 	c.mu.Unlock()
 
-	// The broker closing the connection is the signal the previous version had
-	// no way to observe.
+	// The broker closing the connection is the only reliable signal that it has
+	// gone; nothing else about the connection changes.
 	notify := conn.NotifyClose(make(chan *amqp.Error, 1))
 	go func() {
 		err, ok := <-notify

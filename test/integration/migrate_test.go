@@ -43,10 +43,9 @@ func TestMigrateIsIdempotent(t *testing.T) {
 
 // A migration file edited after release must be refused rather than skipped.
 //
-// The previous version had no schema-version table at all, and its initial
-// migration was in fact edited afterwards: it grew a column and an index that a
-// later migration also added. A fresh install and an upgraded install therefore
-// ended up with different schemas, and nothing anywhere noticed.
+// An edited migration has already run everywhere that upgraded, and will run in
+// its new form everywhere that installs fresh. The two populations then hold
+// different schemas, and without a recorded checksum nothing anywhere notices.
 func TestMigrateRefusesAChangedFile(t *testing.T) {
 	f := newFixture(t)
 	conn := rawConn(t, f.Config)

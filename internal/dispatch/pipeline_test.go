@@ -387,7 +387,7 @@ func TestShutdownReleasesUnattemptedClaims(t *testing.T) {
 }
 
 // A full batch means there is a backlog. Sleeping through the poll interval
-// anyway is what capped the previous version at batch size per interval.
+// anyway would cap throughput at one batch per interval.
 func TestRunLoopDoesNotSleepOnAFullBatch(t *testing.T) {
 	full := batch(10, 0) // BatchSize is 10
 	st := &fakeStore{batches: [][]core.Message{full, full, full}}

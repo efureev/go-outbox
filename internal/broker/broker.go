@@ -2,9 +2,9 @@
 //
 // The contract is batch-shaped: a publisher takes a slice and returns one error
 // per message, positionally. That is not decoration. Kafka's writer accepts a
-// batch in one round trip and reports per-message errors, and publishing one
-// message per call — which is what the previous version did — gives up an order
-// of magnitude of throughput for nothing.
+// batch in one round trip and reports per-message errors, so publishing one
+// message per call would give up an order of magnitude of throughput for
+// nothing.
 package broker
 
 import (
@@ -36,8 +36,8 @@ type Destination struct {
 	// Key is the partition key. Kafka uses it; RabbitMQ ignores it.
 	Key []byte
 	// Exchange and RoutingKey are RabbitMQ's. An empty exchange is the default
-	// exchange and an empty routing key means the topic, which together
-	// reproduce the previous version's behaviour.
+	// exchange and an empty routing key means the topic, so a message that says
+	// nothing about routing still goes somewhere sensible.
 	Exchange   string
 	RoutingKey string
 }
@@ -98,8 +98,8 @@ func (r *Router) DriverFor(stream string) (string, bool) {
 // pipeline per stream, so a batch never mixes them.
 //
 // An unknown stream is permanent: no amount of retrying will make it appear in
-// the configuration, and the previous version spent every retry in the budget
-// discovering that.
+// the configuration, so spending the retry budget to rediscover that is pure
+// delay.
 func (r *Router) Publish(ctx context.Context, stream string, msgs []core.Message) []error {
 	if len(msgs) == 0 {
 		return nil

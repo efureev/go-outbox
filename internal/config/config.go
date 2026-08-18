@@ -64,8 +64,8 @@ type DBConfig struct {
 	Name     string `env:"NAME"`
 	SSLMode  string `env:"SSL_MODE,default=disable"`
 
-	// Schema and Table make the outbox table addressable, instead of the
-	// hardcoded tech.outbox_messages of the previous version.
+	// Schema and Table make the outbox table addressable, so the dispatcher can
+	// live alongside whatever naming the producer's database already uses.
 	Schema string `env:"SCHEMA,default=outbox"`
 	Table  string `env:"TABLE,default=messages"`
 
@@ -113,9 +113,9 @@ type JanitorConfig struct {
 	Enabled bool `env:"ENABLED,default=true"`
 	// ReclaimInterval is how often expired leases are returned to pending.
 	ReclaimInterval time.Duration `env:"RECLAIM_INTERVAL,default=30s"`
-	// StatsInterval drives the gauge refresh. It is deliberately slower than
-	// the poll loop: the previous version counted rows on every iteration,
-	// which is a sequential scan every few seconds once the table is large.
+	// StatsInterval drives the gauge refresh. It is deliberately slower than the
+	// poll loop: counting rows on every iteration is a query every few seconds
+	// against a table that only grows.
 	StatsInterval time.Duration `env:"STATS_INTERVAL,default=30s"`
 
 	// Retention is how long a delivered row is kept. Zero disables purging.
@@ -143,8 +143,8 @@ type HTTPConfig struct {
 	// registered at all — an admin API reachable by anyone who can route to
 	// the pod is worse than no admin API.
 	AdminToken string `env:"ADMIN_TOKEN"`
-	// PprofToken likewise: no token, no pprof. The previous version shipped a
-	// default secret of "secret", which is the same as no protection.
+	// PprofToken likewise: no token, no pprof. A default token would be the same
+	// as no protection, only harder to notice.
 	PprofToken string `env:"PPROF_TOKEN"`
 }
 

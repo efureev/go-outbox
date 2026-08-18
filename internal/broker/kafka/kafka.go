@@ -2,8 +2,8 @@
 //
 // The whole batch goes in one WriteMessages call. kafka-go reports per-message
 // failures through a positional error slice, so nothing is given up by batching
-// — and the previous version, which called WriteMessages once per message with
-// RequiredAcks=all, paid a full broker round trip for each one.
+// — whereas one call per message with RequiredAcks=all pays a full broker round
+// trip for each.
 package kafka
 
 import (
@@ -47,8 +47,8 @@ func New(ctx context.Context, cfg *config.KafkaDriver, log *slog.Logger) (*Publi
 	writer := &kafka.Writer{
 		Addr:      kafka.TCP(cfg.Brokers...),
 		Transport: transport,
-		// Hash keeps a partition key landing on the same partition, matching
-		// what the previous version did.
+		// Hash keeps every message with the same partition key on the same
+		// partition, which is the only ordering guarantee Kafka can offer here.
 		Balancer:               &kafka.Hash{},
 		RequiredAcks:           requiredAcks(cfg.RequiredAcks),
 		Compression:            compression(cfg.Compression),
@@ -172,8 +172,9 @@ func classify(err error) error {
 }
 
 // probe checks that at least one broker answers, so a bad address fails at
-// startup. The previous version dialled Brokers[0] only, so a cluster whose
-// first listed node was down refused to start at all.
+// startup rather than on the first message. Every broker is tried: dialling
+// only the first listed one would refuse to start against a healthy cluster
+// whose first node happened to be down.
 func probe(ctx context.Context, cfg *config.KafkaDriver, transport *kafka.Transport) error {
 	dialer := &kafka.Dialer{
 		Timeout:       5 * time.Second,

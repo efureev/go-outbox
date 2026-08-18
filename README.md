@@ -139,7 +139,6 @@ Metrics and starting alert rules: [docs/MetricsAndAlerts.md](docs/MetricsAndAler
 - [Metrics and alerts](docs/MetricsAndAlerts.md).
 - [Operations](docs/Operations.md) — deploying, scaling, and what to do when
   something is wrong.
-- [Migrating from v2](docs/Migration-v2.md) — what changed, and why.
 
 ## Development
 

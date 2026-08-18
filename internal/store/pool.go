@@ -16,9 +16,9 @@ import (
 // NewPool opens the connection pool and verifies it is usable.
 //
 // The DSN is either given whole or assembled through net/url, which escapes
-// each component. The previous version concatenated a keyword/value string with
-// fmt.Sprintf, so a password containing a space or a quote produced a DSN that
-// parsed into something else entirely.
+// each component. Concatenating a keyword/value string by hand means a password
+// containing a space or a quote produces a DSN that parses into something else
+// entirely.
 func NewPool(ctx context.Context, cfg config.DBConfig, appName string) (*pgxpool.Pool, error) {
 	poolCfg, err := pgxpool.ParseConfig(dsn(cfg))
 	if err != nil {

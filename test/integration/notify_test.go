@@ -18,8 +18,8 @@ import (
 // milliseconds, not on the next poll tick.
 //
 // The poll interval here is deliberately far longer than the deadline, so the
-// test can only pass through the notification path. The previous version had
-// only the tick, and its default was ten seconds.
+// test can only pass through the notification path: on the tick alone, latency
+// is whatever the interval is.
 func TestNotifyDeliversWithoutWaitingForTheTick(t *testing.T) {
 	f := newFixture(t)
 
