@@ -28,31 +28,59 @@ func New(cfg config.LogConfig, w io.Writer) (*slog.Logger, error) {
 		return nil, fmt.Errorf("log level %q: %w", cfg.Level, err)
 	}
 
-	opts := []reggol.Option{
+	format := strings.ToLower(cfg.Format)
+
+	// reggol.WithCaller is deliberately absent: the slog bridge records a call
+	// site on every event regardless of it, so the setting is honoured in the
+	// handler below instead — where it can actually take effect.
+	base := reggol.New(reggol.SyncWriter(w),
 		reggol.WithLevel(level),
-		reggol.WithEncoder(encoder(cfg.Format)),
-	}
-	if cfg.Caller {
-		opts = append(opts, reggol.WithCaller())
-	}
+		reggol.WithEncoder(encoder(format)),
+	)
 
 	// The global threshold gates every event on top of the logger's own, so it
 	// has to be lowered too or a debug level in the configuration has no
 	// effect.
 	reggol.SetGlobalLevel(level)
 
-	return slogr.New(reggol.New(reggol.SyncWriter(w), opts...)), nil
+	return slog.New(&handler{
+		next: slogr.NewHandler(base),
+		// Only the human-facing format gets the name ahead of the message; a
+		// collector reading JSON wants the message unadorned.
+		prefix: format == formatConsole,
+		caller: cfg.Caller,
+	}), nil
 }
 
+// Supported output formats.
+const (
+	formatConsole = "console"
+	formatText    = "text"
+	formatJSON    = "json"
+)
+
+// Timestamp layouts.
+//
+// The console default in reggol is time.Kitchen — "3:19AM" — which cannot order
+// two events inside the same minute, let alone the same second. Delivery
+// latency here is measured in milliseconds, so the console carries them too.
+const (
+	consoleTimeFormat = "15:04:05.000"
+	textTimeFormat    = "2006-01-02T15:04:05.000Z07:00"
+)
+
 func encoder(format string) reggol.Encoder {
-	switch strings.ToLower(format) {
-	case "console":
-		return reggol.NewConsoleEncoder()
-	case "text":
-		return reggol.NewTextEncoder()
+	switch format {
+	case formatConsole:
+		return reggol.NewConsoleEncoder(
+			reggol.WithConsoleOptions(reggol.WithTimeFormat(consoleTimeFormat)),
+		)
+	case formatText:
+		return reggol.NewTextEncoder(reggol.WithTimeFormat(textTimeFormat))
 	default:
 		// slog's own key names, so a collector configured for the standard
-		// library's JSON output reads these records unchanged.
+		// library's JSON output reads these records unchanged. The default
+		// layout is already RFC3339Nano.
 		return reggol.NewJSONEncoder(
 			reggol.WithKeyNames(slog.TimeKey, slog.LevelKey, slog.MessageKey),
 		)

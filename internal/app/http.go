@@ -9,6 +9,7 @@ import (
 	"github.com/efureev/appmod/v4"
 
 	"github.com/efureev/go-outbox/internal/config"
+	"github.com/efureev/go-outbox/internal/logging"
 	"github.com/efureev/go-outbox/internal/store"
 )
 
@@ -31,7 +32,7 @@ func newHTTPModule(cfg config.Config, log *slog.Logger) *httpModule {
 	m := &httpModule{
 		BaseAppModule: appmod.New(appmod.WithConfig(appmod.NewConfig(ModuleHTTP, "v1"))),
 		cfg:           cfg,
-		log:           log.With(slog.String("component", ModuleHTTP)),
+		log:           log.With(slog.String(logging.ModuleKey, ModuleHTTP)),
 	}
 
 	m.AfterStart(m.listen)

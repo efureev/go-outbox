@@ -17,6 +17,7 @@ import (
 	"github.com/efureev/appmod/v4"
 
 	"github.com/efureev/go-outbox/internal/config"
+	"github.com/efureev/go-outbox/internal/logging"
 )
 
 // Module names, used both for registration and to declare dependencies.
@@ -28,6 +29,7 @@ const (
 	ModuleDispatch = "dispatch"
 	ModuleJanitor  = "janitor"
 	ModuleHTTP     = "http"
+	ModuleReady    = "ready"
 )
 
 // Build describes the binary, for the version endpoint.
@@ -48,7 +50,7 @@ type App struct {
 // New assembles the module graph. It does not start anything.
 func New(cfg config.Config, log *slog.Logger, build Build) (*App, error) {
 	mgr := appmod.NewManager(
-		appmod.WithLogger(log.With(slog.String("component", "manager"))),
+		appmod.WithLogger(log.With(slog.String(logging.ComponentKey, "lifecycle"))),
 		appmod.WithShutdownTimeout(cfg.App.ShutdownTimeout),
 	)
 
@@ -92,6 +94,14 @@ func (a *App) register() error {
 		{ModuleJanitor, newJanitorModule(a.cfg, a.log), []string{ModuleDB, ModuleHub, ModuleMetrics}},
 		{ModuleHTTP, httpMod, []string{ModuleDB, ModuleMetrics}},
 	}
+
+	// Depends on everything else, so it lands alone in the last layer and its
+	// announcement is the first thing to happen once the graph is up.
+	all := make([]string, 0, len(entries))
+	for _, e := range entries {
+		all = append(all, e.name)
+	}
+	entries = append(entries, entry{ModuleReady, newReadyModule(a.cfg, a.log, a.version), all})
 
 	for _, e := range entries {
 		if e.module == nil {

@@ -13,6 +13,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
 	"github.com/efureev/go-outbox/internal/config"
+	"github.com/efureev/go-outbox/internal/logging"
 	"github.com/efureev/go-outbox/internal/observability"
 )
 
@@ -37,7 +38,7 @@ func newMetricsModule(cfg config.Config, log *slog.Logger) *metricsModule {
 	m := &metricsModule{
 		BaseAppModule: appmod.New(appmod.WithConfig(appmod.NewConfig(ModuleMetrics, "v1"))),
 		cfg:           cfg,
-		log:           log.With(slog.String("component", ModuleMetrics)),
+		log:           log.With(slog.String(logging.ModuleKey, ModuleMetrics)),
 	}
 
 	m.BeforeStart(m.build)

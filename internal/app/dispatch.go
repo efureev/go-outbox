@@ -13,6 +13,7 @@ import (
 	"github.com/efureev/go-outbox/internal/config"
 	"github.com/efureev/go-outbox/internal/dispatch"
 	"github.com/efureev/go-outbox/internal/events"
+	"github.com/efureev/go-outbox/internal/logging"
 	"github.com/efureev/go-outbox/internal/store"
 )
 
@@ -37,7 +38,7 @@ func newDispatchModule(cfg config.Config, log *slog.Logger) *dispatchModule {
 	m := &dispatchModule{
 		BaseAppModule: appmod.New(appmod.WithConfig(appmod.NewConfig(ModuleDispatch, "v1"))),
 		cfg:           cfg,
-		log:           log.With(slog.String("component", ModuleDispatch)),
+		log:           log.With(slog.String(logging.ModuleKey, ModuleDispatch)),
 	}
 
 	m.AfterStart(m.start)

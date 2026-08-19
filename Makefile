@@ -14,6 +14,7 @@ PLATFORMS ?= linux/amd64 linux/arm64 darwin/amd64 darwin/arm64
 
 BENCHTIME     ?= 3000x
 BENCHLATENCY  ?= 200x
+BENCHLOGGING  ?= 200000x
 BENCHCOUNT    ?= 3
 VERSION    ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 COMMIT     ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo none)
@@ -27,7 +28,7 @@ LDFLAGS := -s -w \
 	-X 'main.date=$(BUILD_DATE)'
 
 .DEFAULT_GOAL := help
-.PHONY: help build run test test-integration test-all bench bench-throughput bench-latency dist cover lint lint-host fmt fmt-host tidy up down logs psql image clean clean-cache
+.PHONY: help build run test test-integration test-all bench bench-logging bench-throughput bench-latency dist cover lint lint-host fmt fmt-host tidy up down logs psql image clean clean-cache
 
 help: ## List the available targets
 	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z_-]+:.*?## / {printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -46,7 +47,10 @@ test-integration: ## Run the integration tests (needs `make up`)
 
 test-all: test test-integration ## Run every test
 
-bench: bench-throughput bench-latency ## Run every benchmark (needs `make up`)
+bench: bench-logging bench-throughput bench-latency ## Run every benchmark (the last two need `make up`)
+
+bench-logging: ## Benchmark what a log line costs (no infrastructure needed)
+	go test -run '^$$' -bench . -benchtime $(BENCHLOGGING) -count $(BENCHCOUNT) ./internal/logging/...
 
 bench-throughput: ## Benchmark sustained delivery
 	go test -tags integration -run '^$$' -bench 'BenchmarkDrain' \

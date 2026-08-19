@@ -11,6 +11,7 @@ import (
 	"github.com/efureev/go-outbox/internal/config"
 	"github.com/efureev/go-outbox/internal/dispatch"
 	"github.com/efureev/go-outbox/internal/events"
+	"github.com/efureev/go-outbox/internal/logging"
 	"github.com/efureev/go-outbox/internal/store"
 )
 
@@ -29,7 +30,7 @@ func newJanitorModule(cfg config.Config, log *slog.Logger) *janitorModule {
 	m := &janitorModule{
 		BaseAppModule: appmod.New(appmod.WithConfig(appmod.NewConfig(ModuleJanitor, "v1"))),
 		cfg:           cfg,
-		log:           log.With(slog.String("component", ModuleJanitor)),
+		log:           log.With(slog.String(logging.ModuleKey, ModuleJanitor)),
 	}
 
 	m.AfterStart(m.start)

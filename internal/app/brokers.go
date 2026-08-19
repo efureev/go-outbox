@@ -11,6 +11,7 @@ import (
 	"github.com/efureev/go-outbox/internal/broker/kafka"
 	"github.com/efureev/go-outbox/internal/broker/rabbitmq"
 	"github.com/efureev/go-outbox/internal/config"
+	"github.com/efureev/go-outbox/internal/logging"
 )
 
 // brokersModule builds one publisher per configured driver and publishes the
@@ -27,7 +28,7 @@ func newBrokersModule(cfg config.Config, log *slog.Logger) *brokersModule {
 	m := &brokersModule{
 		BaseAppModule: appmod.New(appmod.WithConfig(appmod.NewConfig(ModuleBrokers, "v1"))),
 		cfg:           cfg,
-		log:           log.With(slog.String("component", ModuleBrokers)),
+		log:           log.With(slog.String(logging.ModuleKey, ModuleBrokers)),
 	}
 
 	m.BeforeStart(m.connect)

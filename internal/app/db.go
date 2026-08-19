@@ -8,6 +8,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/efureev/go-outbox/internal/config"
+	"github.com/efureev/go-outbox/internal/logging"
 	"github.com/efureev/go-outbox/internal/store"
 )
 
@@ -26,7 +27,7 @@ func newDBModule(cfg config.Config, log *slog.Logger) *dbModule {
 	m := &dbModule{
 		BaseAppModule: appmod.New(appmod.WithConfig(appmod.NewConfig(ModuleDB, "v1"))),
 		cfg:           cfg,
-		log:           log.With(slog.String("component", ModuleDB)),
+		log:           log.With(slog.String(logging.ModuleKey, ModuleDB)),
 	}
 
 	m.BeforeStart(m.open)

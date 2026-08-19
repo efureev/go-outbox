@@ -12,6 +12,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 
 	"github.com/efureev/go-outbox/internal/app"
@@ -74,6 +75,11 @@ func runServer(_ []string) int {
 
 		return 1
 	}
+
+	// The same value a claim records in the owner column, so a log line and the
+	// row it is about name the same replica. Without it, several replicas
+	// shipping to one collector produce indistinguishable lines.
+	log = log.With(slog.String(logging.InstanceKey, cfg.App.Instance))
 
 	application, err := app.New(cfg, log, app.Build{Version: version, Commit: commit, Date: date})
 	if err != nil {

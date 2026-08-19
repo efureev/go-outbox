@@ -6,6 +6,8 @@ import (
 
 	"github.com/efureev/appmod/adapters/hubmod"
 	"github.com/efureev/msghub/v3"
+
+	"github.com/efureev/go-outbox/internal/logging"
 )
 
 // newHubModule owns the in-process bus that carries the dispatcher's domain
@@ -20,7 +22,7 @@ import (
 // version's publisher came to have three unrelated responsibilities in one
 // function.
 func newHubModule(log *slog.Logger) *hubmod.Module {
-	l := log.With(slog.String("component", "hub"))
+	l := log.With(slog.String(logging.ModuleKey, ModuleHub))
 
 	hub := msghub.New(
 		msghub.WithLogger(l),
