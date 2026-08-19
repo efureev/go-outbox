@@ -71,6 +71,13 @@ func New(ctx context.Context, cfg *config.PostgresDriver, log *slog.Logger) (*Pu
 		//
 		// ON CONFLICT is the whole point: a repeat after a replica died between
 		// the insert and the write-back is the expected case, not an error.
+		//
+		// The conflict target is named on purpose, and it costs a wider grant:
+		// PostgreSQL requires SELECT on the table when ON CONFLICT has a target,
+		// so the role needs INSERT and SELECT rather than INSERT alone. The
+		// target-less form would need only INSERT and is wrong here — it
+		// swallows any unique violation, so a message with a new id but a taken
+		// business key would vanish and be reported as delivered.
 		insert: fmt.Sprintf(`
 			INSERT INTO %s (id, stream, topic, payload, headers)
 			SELECT id, stream, topic, payload, headers::jsonb

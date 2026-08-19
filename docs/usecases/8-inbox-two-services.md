@@ -34,14 +34,23 @@ The role the orders dispatcher uses needs to be able to do exactly one thing:
 
 ```sql
 CREATE ROLE orders_dispatcher LOGIN PASSWORD '…';
-GRANT USAGE  ON SCHEMA inbox TO orders_dispatcher;
-GRANT INSERT ON inbox.orders TO orders_dispatcher;
--- And nothing else: no SELECT, no UPDATE, no DELETE.
+GRANT USAGE          ON SCHEMA inbox TO orders_dispatcher;
+GRANT INSERT, SELECT ON inbox.orders TO orders_dispatcher;
+-- And nothing else: no UPDATE, no DELETE.
 ```
 
-That is not caution, it is a description of what the driver does: `INSERT` only.
-It needs no wider right, and a narrow grant turns "a sidecar writes into our
-database" into a checkable statement.
+**`SELECT` is required here, and it is not a typo.** The driver only inserts, but
+it does so with `ON CONFLICT (id) DO NOTHING`, and PostgreSQL requires read
+access to the table when `ON CONFLICT` names a conflict target. Measured: with
+`INSERT` alone a plain insert succeeds and the same insert with `ON CONFLICT
+(id)` fails with `42501 permission denied`.
+
+The target-less form — `ON CONFLICT DO NOTHING` — would need only `INSERT`, and
+it is deliberately not used: it swallows **any** unique violation, not just a
+repeat of the same `id`. A message with a new `id` but a taken business key would
+then vanish silently and be reported as delivered. Measured by the same
+experiment. The wider grant is the lesser evil: a lost message is worse than a
+read privilege.
 
 ### The orders dispatcher's configuration
 
@@ -90,7 +99,9 @@ If the conversation does continue, the mitigating facts are:
 - The interface is narrow: one table, `INSERT` only, a fixed and documented
   shape. It is arguably narrower than a shared broker topic, where both sides
   agree on a message schema and neither can enforce it.
-- The grant is checkable: `GRANT INSERT` and nothing more.
+- The grant is checkable: `GRANT INSERT, SELECT` and nothing more — no `UPDATE`,
+  no `DELETE`. The read is needed by `ON CONFLICT` itself, not by us: the
+  dispatcher issues no `SELECT` against this table.
 - But the credentials, the network path between databases and a migration
   coordinated between two teams do not go away.
 
