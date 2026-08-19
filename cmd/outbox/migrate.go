@@ -3,7 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
-	"os"
+	"io"
 	"time"
 
 	"github.com/efureev/go-outbox/internal/config"
@@ -13,17 +13,26 @@ import (
 
 const migrateTimeout = 5 * time.Minute
 
-func runMigrate(args []string) int {
+func runMigrate(args []string, stdout, stderr io.Writer) int {
 	action := "up"
 	if len(args) > 0 {
 		action = args[0]
+	}
+
+	// The action is checked before anything is loaded. It costs nothing, and an
+	// operator who mistyped it should be told that rather than being told about
+	// database configuration they did not ask about yet.
+	if action != "up" && action != "status" {
+		fmt.Fprintf(stderr, "unknown migrate action %q (want up or status)\n", action)
+
+		return 2
 	}
 
 	// Migrating needs a database and nothing else, so it is not held up by a
 	// routing table it never consults.
 	cfg, err := config.LoadAdmin(".env")
 	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
+		fmt.Fprintln(stderr, err)
 
 		return 1
 	}
@@ -33,27 +42,27 @@ func runMigrate(args []string) int {
 
 	switch action {
 	case "up":
-		log, err := logging.New(cfg.Log, os.Stdout)
+		log, err := logging.New(cfg.Log, stdout)
 		if err != nil {
-			fmt.Fprintln(os.Stderr, err)
+			fmt.Fprintln(stderr, err)
 
 			return 1
 		}
 
 		applied, err := store.Migrate(ctx, cfg, log)
 		if err != nil {
-			fmt.Fprintln(os.Stderr, err)
+			fmt.Fprintln(stderr, err)
 
 			return 1
 		}
 
 		if len(applied) == 0 {
-			fmt.Println("schema is up to date")
+			fmt.Fprintln(stdout, "schema is up to date")
 
 			return 0
 		}
 		for _, r := range applied {
-			fmt.Printf("applied %04d_%s\n", r.Version, r.Name)
+			fmt.Fprintf(stdout, "applied %04d_%s\n", r.Version, r.Name)
 		}
 
 		return 0
@@ -61,7 +70,7 @@ func runMigrate(args []string) int {
 	case "status":
 		applied, shipped, err := store.MigrationStatus(ctx, cfg)
 		if err != nil {
-			fmt.Fprintln(os.Stderr, err)
+			fmt.Fprintln(stderr, err)
 
 			return 1
 		}
@@ -71,20 +80,19 @@ func runMigrate(args []string) int {
 			done[r.Version] = r.AppliedAt
 		}
 
-		fmt.Printf("%-6s  %-24s  %s\n", "VER", "NAME", "APPLIED")
+		fmt.Fprintf(stdout, "%-6s  %-24s  %s\n", "VER", "NAME", "APPLIED")
 		for _, r := range shipped {
 			at := "pending"
 			if t, ok := done[r.Version]; ok {
 				at = t.UTC().Format(time.RFC3339)
 			}
-			fmt.Printf("%-6d  %-24s  %s\n", r.Version, r.Name, at)
+			fmt.Fprintf(stdout, "%-6d  %-24s  %s\n", r.Version, r.Name, at)
 		}
 
 		return 0
 
 	default:
-		fmt.Fprintf(os.Stderr, "unknown migrate action %q (want up or status)\n", action)
-
+		// Unreachable: the action was checked above.
 		return 2
 	}
 }

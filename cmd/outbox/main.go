@@ -12,6 +12,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 
@@ -28,10 +29,13 @@ var (
 )
 
 func main() {
-	os.Exit(run(os.Args[1:]))
+	os.Exit(run(os.Args[1:], os.Stdout, os.Stderr))
 }
 
-func run(args []string) int {
+// run dispatches, and the two writers are arguments rather than os.Stdout and
+// os.Stderr reached for directly: the dispatch table is the one part of the
+// command line that can be checked without a database behind it.
+func run(args []string, stdout, stderr io.Writer) int {
 	command := "run"
 	if len(args) > 0 {
 		command = args[0]
@@ -42,24 +46,24 @@ func run(args []string) int {
 	case "run", "serve":
 		return runServer(args)
 	case "migrate":
-		return runMigrate(args)
+		return runMigrate(args, stdout, stderr)
 	case "failed":
-		return runFailed(args)
+		return runFailed(args, stdout, stderr)
 	case "requeue":
-		return runRequeue(args)
+		return runRequeue(args, stdout, stderr)
 	case "stats":
-		return runStats(args)
+		return runStats(args, stdout, stderr)
 	case "version", "-v", "--version":
-		fmt.Printf("outbox %s (commit %s, built %s)\n", version, commit, date)
+		fmt.Fprintf(stdout, "outbox %s (commit %s, built %s)\n", version, commit, date)
 
 		return 0
 	case "help", "-h", "--help":
-		usage(os.Stdout)
+		usage(stdout)
 
 		return 0
 	default:
-		fmt.Fprintf(os.Stderr, "unknown command %q\n\n", command)
-		usage(os.Stderr)
+		fmt.Fprintf(stderr, "unknown command %q\n\n", command)
+		usage(stderr)
 
 		return 2
 	}
@@ -107,7 +111,7 @@ func runServer(_ []string) int {
 	return application.ExitCode()
 }
 
-func usage(w *os.File) {
+func usage(w io.Writer) {
 	fmt.Fprint(w, `Usage: outbox <command>
 
 Commands:
