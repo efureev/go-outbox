@@ -6,6 +6,11 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.6.0] — 2026-08-19
+
+The broker stops being mandatory. A dispatcher can now deliver into a table — the consumer's inbox
+— and a producer that is not on pgx can write to the outbox.
+
 ### Added
 
 - **A `postgres` driver: delivery into a table instead of to a broker.** The destination is the
