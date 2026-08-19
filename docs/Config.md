@@ -245,6 +245,9 @@ Each cycle takes a PostgreSQL advisory lock, so it runs on one replica per cycle
 | `OUTBOX_METRICS_ENABLED`       | `true`     |                                                                                           |
 | `OUTBOX_METRICS_PORT`          | `9100`     | Must differ from the HTTP port.                                                           |
 | `OUTBOX_METRICS_PATH`          | `/metrics` |                                                                                           |
+| `OUTBOX_OTEL_ENDPOINT`               | —            | Collector address for OTLP/HTTP, `host:port` without a scheme. Empty — the default — turns tracing off: no exporter is built and no span is started. |
+| `OUTBOX_OTEL_INSECURE`               | `false`      | Send over plain HTTP. Right for a collector alongside the process, wrong for one across a network.                                                     |
+| `OUTBOX_OTEL_SAMPLING`               | `1.0`        | Fraction of traces to record when the producer expressed no preference. A producer that did decide is followed either way.                             |
 
 ## Dead-letter forwarding
 

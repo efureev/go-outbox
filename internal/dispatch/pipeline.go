@@ -18,6 +18,7 @@ import (
 	"github.com/efureev/go-outbox/internal/core"
 	"github.com/efureev/go-outbox/internal/events"
 	"github.com/efureev/go-outbox/internal/store"
+	"github.com/efureev/go-outbox/internal/tracing"
 )
 
 // Store is the database side of a pipeline.
@@ -55,10 +56,25 @@ type Pipeline struct {
 	owner   string
 	breaker *breaker
 
+	tracer *tracing.Tracer
+	dest   tracing.Destination
+
 	// wake carries "there is work" from the notification listener. Capacity
 	// one, because the signal is idempotent: two notifications and one mean the
 	// same thing to a loop that claims everything due.
 	wake chan struct{}
+}
+
+// Option adjusts a pipeline at construction. Options exist so that wiring a
+// dependency the dispatcher can run without — tracing is the only one so far —
+// does not become a parameter every caller has to pass nil for.
+type Option func(*Pipeline)
+
+// WithTracer records a span per published message. Without it the pipeline
+// holds a tracer that does nothing, which is also what a deployment with no
+// collector configured gets.
+func WithTracer(t *tracing.Tracer) Option {
+	return func(p *Pipeline) { p.tracer = t }
 }
 
 // New builds a pipeline for one stream.
@@ -69,10 +85,19 @@ func New(
 	emitter Emitter,
 	cfg config.Config,
 	log *slog.Logger,
+	opts ...Option,
 ) *Pipeline {
 	driver, _ := router.DriverFor(stream)
 
-	return &Pipeline{
+	// The driver's type, not its name, is what generic tracing tools key their
+	// messaging views on. It is empty when the driver is unknown, which the
+	// router already reports as a permanent failure on the first message.
+	var system string
+	if d, ok := cfg.Brokers.Drivers[driver]; ok && d != nil {
+		system = string(d.Type())
+	}
+
+	p := &Pipeline{
 		stream:  stream,
 		driver:  driver,
 		store:   st,
@@ -87,8 +112,16 @@ func New(
 		},
 		owner:   cfg.App.Instance,
 		breaker: newBreaker(cfg.Dispatch.PollInterval, cfg.Dispatch.PauseMax),
+		tracer:  tracing.Disabled(),
+		dest:    tracing.Destination{Stream: stream, Driver: driver, System: system},
 		wake:    make(chan struct{}, 1),
 	}
+
+	for _, opt := range opts {
+		opt(p)
+	}
+
+	return p
 }
 
 // Result summarises one cycle in the terms the run loop needs: whether more

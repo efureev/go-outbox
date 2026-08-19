@@ -55,7 +55,12 @@ application beyond one `INSERT`.
   matters: how long the oldest undelivered message has waited. Failed messages are
   listable and requeueable over HTTP, so nobody writes an `UPDATE` by hand.
 
-- **Boring to operate.** A 23 MB `scratch` image with no shell and no package manager,
+- **Visible inside a trace.** Point it at an OpenTelemetry collector and each message
+  gets an `outbox.publish` span between the producer's and the consumer's, so the wait
+  between committing a row and handing it to a broker stops being a number nobody can
+  explain. Off by default, and off costs nothing: no exporter, no span, no allocation.
+
+- **Boring to operate.** A 29 MB `scratch` image with no shell and no package manager,
   or a static binary. Delivered rows are swept on a retention you set. Ten direct
   dependencies, no web framework, no DI container.
 
@@ -64,7 +69,7 @@ application beyond one `INSERT`.
   misspelled driver key, three drivers each missing a DSN — so a misconfigured
   deployment takes one restart to diagnose rather than one per mistake.
 
-- **Proven, not asserted.** 163 tests, half of them against real PostgreSQL, RabbitMQ
+- **Proven, not asserted.** 172 tests, half of them against real PostgreSQL, RabbitMQ
   and Redpanda, because a set of concurrency rules expressed in SQL cannot be checked
   by a mock that matches query text.
 

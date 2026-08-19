@@ -247,6 +247,9 @@ OUTBOX_DRIVER_RMQ_LOCAL_PREFIX=loc
 | `OUTBOX_METRICS_ENABLED`       | `true`       |                                                                                       |
 | `OUTBOX_METRICS_PORT`          | `9100`       | Должен отличаться от HTTP-порта.                                                      |
 | `OUTBOX_METRICS_PATH`          | `/metrics`   |                                                                                       |
+| `OUTBOX_OTEL_ENDPOINT`               | —            | Адрес коллектора для OTLP/HTTP, `host:port` без схемы. Пусто — по умолчанию — выключает трейсинг: экспортёр не строится, спаны не открываются. |
+| `OUTBOX_OTEL_INSECURE`               | `false`      | Отправлять по обычному HTTP. Верно для коллектора рядом с процессом, неверно — для коллектора через сеть.                                      |
+| `OUTBOX_OTEL_SAMPLING`               | `1.0`        | Доля трейсов, которые записывать, если продюсер не выразил предпочтения. За решившим продюсером следуем в любом случае.                        |
 
 ## Пересылка в dead-letter
 

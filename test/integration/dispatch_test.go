@@ -25,6 +25,7 @@ type harness struct {
 	*fixture
 
 	Pipeline *dispatch.Pipeline
+	Router   *broker.Router
 	Hub      *msghub.Hub
 	Prefix   string
 
@@ -96,6 +97,7 @@ func newHarness(t testing.TB, tune ...string) *harness {
 		t.Fatalf("subscribe: %v", err)
 	}
 
+	h.Router = router
 	h.Pipeline = dispatch.New("local", f.Store, router, events.NewEmitter(hub, logging.Nop()), cfg, logging.Nop())
 
 	return h

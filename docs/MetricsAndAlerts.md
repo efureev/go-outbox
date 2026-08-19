@@ -67,6 +67,60 @@ whatever it likes into the `stream` column.
 - `messages_failed_total{reason="permanent"}` rising — a configuration or
   routing mistake, not an outage. Retrying will not help and is not happening.
 
+## Tracing
+
+A producer's span ends when its transaction commits. A consumer's span starts
+when the broker hands it a message. Between them is a gap exactly the width of
+the outbox lag, and a metric can tell you it is large but not what it was made
+of.
+
+Point the dispatcher at a collector and it fills the gap in:
+
+```bash
+OUTBOX_OTEL_ENDPOINT=otel-collector:4318
+OUTBOX_OTEL_INSECURE=true          # a collector alongside the process
+```
+
+Each published message gets one `outbox.publish` span, parented to the
+producer's `traceparent` and re-injected into the message's headers so the
+consumer continues from it. A trace then reads producer → `outbox.publish` →
+consumer, in one trace, with the wait visible as the space in front of the
+middle span.
+
+| Attribute | Meaning |
+|---|---|
+| `messaging.system` | `rabbitmq` or `kafka`, so generic messaging views work. |
+| `messaging.destination.name` | The topic the message was routed to. |
+| `messaging.message.id` | The outbox row id, which is also what the consumer deduplicates on. |
+| `outbox.stream`, `outbox.driver` | Which pipeline and which broker handled it. |
+| `outbox.attempts` | Rejections so far, so a retried message is recognisable. |
+| `outbox.wait_seconds` | Time between commit and this publish. The span covers the publish alone, so without this the wait is visible as empty space and nothing else. |
+
+Two things worth knowing before turning it on.
+
+**A producer that never traced still gets a span**, and its consumer gets a
+header to continue from. Requiring the producer to have traced first would make
+this useful only where it was needed least.
+
+**The header changes.** With tracing on, what reaches the broker is a
+`traceparent` naming the dispatcher's span rather than the producer's. The trace
+id is unchanged, so nothing leaves the producer's trace — only the parent moves,
+which is what puts the dispatcher between the two ends instead of beside them.
+With tracing off the header is passed through untouched, exactly as before.
+
+### What it costs
+
+Measured, not estimated. Off, it is free: the publish loop checks one boolean
+and starts no span, at **0 allocations and about 5 ns** per message. On, a span
+costs about **1.9 µs and 17 allocations** per message — roughly 1.4% of one core
+at the throughput `make bench` reports.
+
+The size of the binary is the real price. The OpenTelemetry SDK and its OTLP
+encoder add **6.3 MB to a 15.5 MB binary** and 8.5 MB to the image, whether or
+not a collector is ever configured. gRPC appears in `go.mod` as an indirect
+requirement of the OTLP proto module but no package of it is imported, so none
+of it is linked in.
+
 ## Dashboard
 
 [`dashboards/outbox.json`](../dashboards/outbox.json) is a Grafana dashboard for

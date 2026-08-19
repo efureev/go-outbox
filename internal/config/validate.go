@@ -51,6 +51,7 @@ func (c Config) validate(prior error) error {
 	c.validateDispatch(add)
 	c.validateJanitor(add)
 	c.validatePorts(add)
+	c.validateOTel(add)
 	c.validateBrokers(add, prior != nil)
 
 	if len(errs) == 0 {
@@ -58,6 +59,17 @@ func (c Config) validate(prior error) error {
 	}
 
 	return fmt.Errorf("invalid configuration:\n  - %s", joinErrors(errs, "\n  - "))
+}
+
+func (c Config) validateOTel(add func(string, ...any)) {
+	if c.OTel.Sampling < 0 || c.OTel.Sampling > 1 {
+		add("OUTBOX_OTEL_SAMPLING must be between 0 and 1, got %v", c.OTel.Sampling)
+	}
+	// A scheme here is the mistake this catches: the OTLP/HTTP exporter takes a
+	// host and port, and silently appends its own path to anything else.
+	if e := c.OTel.Endpoint; strings.Contains(e, "://") {
+		add("OUTBOX_OTEL_ENDPOINT must be host:port without a scheme, got %q", e)
+	}
 }
 
 func (c Config) validateApp(add func(string, ...any)) {

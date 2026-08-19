@@ -6,6 +6,38 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **An `outbox.publish` span per message, closing the gap in the producer's trace.** A producer's
+  span ends when its transaction commits and a consumer's starts when the broker hands it a
+  message; between them is an interval exactly the width of the outbox lag, which a metric can size
+  but not explain. The span is parented to the producer's `traceparent` and re-injected into the
+  message's headers, so a trace reads producer → `outbox.publish` → consumer, in one trace, with
+  the wait visible as the space in front of the middle span.
+
+  A producer that never traced still gets a span and its consumer a header to continue from:
+  requiring the producer to have traced first would make this useful only where it was needed
+  least.
+
+  Configured by `OUTBOX_OTEL_ENDPOINT` (OTLP/HTTP), with `OUTBOX_OTEL_INSECURE` and
+  `OUTBOX_OTEL_SAMPLING`. Sampling defers to the producer's decision when there is one, so a trace
+  sampled at the source does not lose its middle here.
+
+### Changed
+
+- **With tracing on, the `traceparent` reaching the broker names the dispatcher's span** rather
+  than the producer's. The trace id is unchanged — nothing leaves the producer's trace, only the
+  parent moves — which is what puts the dispatcher between the two ends instead of beside them.
+  With tracing off, which is the default, the header is passed through untouched exactly as before.
+
+- **The image is 29 MB, up from 21 MB.** The OpenTelemetry SDK and its OTLP encoder add 6.3 MB to a
+  15.5 MB binary whether or not a collector is ever configured, and that is the real price of this
+  release. What it does not cost is throughput: with no endpoint set the publish loop checks one
+  boolean and starts no span, at 0 allocations and about 5 ns per message. A recorded span costs
+  about 1.9 µs and 17 allocations. gRPC appears in `go.mod` as an indirect requirement of the OTLP
+  proto module, but no package of it is imported and none of it is linked in.
+
+
 ## [1.4.0] — 2026-08-19
 
 The operational round: the tools an operator reaches for, and the evidence that what they are

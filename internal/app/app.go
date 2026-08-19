@@ -26,6 +26,7 @@ const (
 	ModuleDB       = "db"
 	ModuleBrokers  = "brokers"
 	ModuleMetrics  = "metrics"
+	ModuleTracing  = "tracing"
 	ModuleDispatch = "dispatch"
 	ModuleJanitor  = "janitor"
 	ModuleHTTP     = "http"
@@ -90,7 +91,9 @@ func (a *App) register() error {
 		{ModuleDB, newDBModule(a.cfg, a.log), nil},
 		{ModuleBrokers, newBrokersModule(a.cfg, a.log), nil},
 		{ModuleMetrics, newMetricsModule(a.cfg, a.log), []string{ModuleHub}},
-		{ModuleDispatch, newDispatchModule(a.cfg, a.log), []string{ModuleDB, ModuleBrokers, ModuleHub, ModuleMetrics}},
+		{ModuleTracing, newTracingModule(a.cfg, a.log, a.version), nil},
+		{ModuleDispatch, newDispatchModule(a.cfg, a.log),
+			[]string{ModuleDB, ModuleBrokers, ModuleHub, ModuleMetrics, ModuleTracing}},
 		{ModuleJanitor, newJanitorModule(a.cfg, a.log), []string{ModuleDB, ModuleHub, ModuleMetrics}},
 		{ModuleHTTP, httpMod, []string{ModuleDB, ModuleMetrics}},
 	}

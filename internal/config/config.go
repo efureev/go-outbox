@@ -23,6 +23,7 @@ type Config struct {
 	Janitor  JanitorConfig  `env:"JANITOR"`
 	HTTP     HTTPConfig     `env:"HTTP"`
 	Metrics  MetricsConfig  `env:"METRICS"`
+	OTel     OTelConfig     `env:"OTEL"`
 	DLQ      DLQConfig      `env:"DLQ"`
 
 	// Brokers is assembled separately: stream and driver names are not known
@@ -181,6 +182,26 @@ type MetricsConfig struct {
 	Enabled bool   `env:"ENABLED,default=true"`
 	Port    int    `env:"PORT,default=9100"`
 	Path    string `env:"PATH,default=/metrics"`
+}
+
+// OTelConfig points the dispatcher's traces at a collector.
+//
+// A producer's span ends at commit and a consumer's starts at receive; the
+// interval between them is the outbox lag, and nothing described it until the
+// dispatcher emitted a span of its own.
+type OTelConfig struct {
+	// Endpoint is the collector's OTLP/HTTP address, host:port without a
+	// scheme. Empty — the default — turns tracing off entirely: no exporter is
+	// built and no span is started, so the publish loop pays nothing at all
+	// rather than paying for a no-op provider.
+	Endpoint string `env:"ENDPOINT"`
+	// Insecure sends over plain HTTP. Right for a collector alongside the
+	// process, wrong for one across a network.
+	Insecure bool `env:"INSECURE,default=false"`
+	// Sampling is the fraction of traces to record when the producer expressed
+	// no preference. A producer that did decide is followed either way, so a
+	// trace sampled at the source keeps its middle.
+	Sampling float64 `env:"SAMPLING,default=1.0"`
 }
 
 // DLQConfig routes messages that reached StatusFailed to a dead-letter

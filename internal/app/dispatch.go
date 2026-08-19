@@ -15,6 +15,7 @@ import (
 	"github.com/efureev/go-outbox/internal/events"
 	"github.com/efureev/go-outbox/internal/logging"
 	"github.com/efureev/go-outbox/internal/store"
+	"github.com/efureev/go-outbox/internal/tracing"
 )
 
 // dispatchModule runs one pipeline per configured stream.
@@ -66,6 +67,11 @@ func (m *dispatchModule) start(_ context.Context, _ appmod.HookModule) error {
 		return err
 	}
 
+	tracer, err := appmod.Require[*tracing.Tracer](registry)
+	if err != nil {
+		return err
+	}
+
 	emitter := events.NewEmitter(hub, m.log)
 
 	if m.cfg.DLQ.Enabled {
@@ -87,7 +93,8 @@ func (m *dispatchModule) start(_ context.Context, _ appmod.HookModule) error {
 	}
 
 	for _, stream := range m.cfg.Brokers.StreamNames() {
-		m.pipelines = append(m.pipelines, dispatch.New(stream, st, router, emitter, m.cfg, m.log))
+		m.pipelines = append(m.pipelines,
+			dispatch.New(stream, st, router, emitter, m.cfg, m.log, dispatch.WithTracer(tracer)))
 	}
 
 	// The pipelines run against a context of their own, canceled by the

@@ -54,6 +54,29 @@ func (f *fixture) insert(t testing.TB, stream, topic string, payload []byte, tar
 	return id
 }
 
+// insertWithHeaders writes a message carrying producer headers, which is how a
+// traceparent reaches the dispatcher in the first place.
+func (f *fixture) insertWithHeaders(
+	t testing.TB, stream, topic string, payload []byte, headers map[string]string,
+) {
+	t.Helper()
+
+	id := uuid.NewString()
+
+	raw, err := json.Marshal(headers)
+	if err != nil {
+		t.Fatalf("marshal headers: %v", err)
+	}
+
+	_, err = f.Pool.Exec(t.Context(), fmt.Sprintf(
+		`INSERT INTO %q.messages (id, stream, topic, payload, headers, target)
+		 VALUES ($1, $2, $3, $4, $5, '{}'::jsonb)`, f.Schema),
+		id, stream, topic, payload, raw)
+	if err != nil {
+		t.Fatalf("insert message: %v", err)
+	}
+}
+
 // lease builds a fresh lease for the given owner.
 func lease(owner string, ttl time.Duration) core.Lease {
 	return core.Lease{

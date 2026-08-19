@@ -46,7 +46,14 @@ func (p *Pipeline) publish(ctx context.Context, msgs []core.Message) (results []
 			publishCtx, cancel := context.WithTimeout(ctx, p.cfg.PublishTimeout)
 			defer cancel()
 
+			// The spans open before the publish because opening one rewrites
+			// the message's traceparent, and the header has to carry the new
+			// value to the broker for the consumer to continue from here.
+			spans := p.tracer.Publish(publishCtx, p.dest, msgs[c.start:c.end])
+
 			errs := p.router.Publish(publishCtx, p.stream, msgs[c.start:c.end])
+
+			spans.End(errs)
 
 			// One duration for the chunk. A per-message figure would be a
 			// fiction for a driver that writes the chunk in one round trip.

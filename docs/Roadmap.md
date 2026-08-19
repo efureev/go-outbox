@@ -19,7 +19,7 @@ would land rather than when.
 | CLI parity with the admin API | **Shipped in 1.4.0** |
 | A Grafana dashboard as JSON | **Shipped in 1.4.0** |
 | Supply-chain hygiene in CI | **Shipped in 1.4.0** |
-| OpenTelemetry spans | Planned — 1.5 |
+| OpenTelemetry spans | **Done**, not yet released |
 | Table partitioning, and a soak target | Planned — 1.6 |
 | NATS JetStream, Redis Streams, a `database/sql` client | Planned — 1.7 |
 | Per-key ordering | Planned — 2.0 |
@@ -90,10 +90,16 @@ of its own. Adding `outbox.publish`, linked to the producer's context, closes
 the hole and makes lag attributable to a stage: waiting to be claimed, waiting
 for the broker, or waiting on a retry.
 
-**Cost, stated honestly.** OpenTelemetry adds roughly four modules to a
-dependency list currently held at ten direct entries. That is a real price and I
-would pay it: tracing is the single most-requested thing from operators, and the
-exporter costs nothing when `OUTBOX_OTEL_ENDPOINT` is unset.
+**Done, not yet released**, and the cost was worse than this page guessed. It
+estimated "roughly four modules"; the measured price is four direct
+dependencies, sixteen indirect, and **6.3 MB on a 15.5 MB binary** — 41% more
+image, paid whether or not a collector is ever configured. The throughput
+estimate held: with no endpoint set the publish loop starts no span, at zero
+allocations.
+
+Worth it, on the same reasoning as before — tracing is the most-requested thing
+from operators — but worth recording that the number was wrong, because the next
+estimate on this page is written by the same hand.
 
 ---
 
