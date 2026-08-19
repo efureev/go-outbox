@@ -21,7 +21,8 @@ would land rather than when.
 | Supply-chain hygiene in CI | **Shipped in 1.4.0** |
 | OpenTelemetry spans | **Shipped in 1.5.0** |
 | Table partitioning, and a soak target | **Shipped in 1.5.0** |
-| NATS JetStream, Redis Streams, a `database/sql` client | Planned — 1.6 |
+| NATS JetStream and Redis Streams | Planned — 1.6 |
+| A `database/sql` producer client | **Done**, not yet released |
 | Per-key ordering | Planned — 2.0 |
 
 What is deliberately **not** on the list, and the reasoning for each refusal, is
@@ -99,14 +100,20 @@ Details in [the changelog](../CHANGELOG.md) and
 `broker.Publisher` exists precisely so that this is cheap, and a driver is the
 clearest way to prove the interface was worth having.
 
+Specified in detail, with the size of each candidate measured rather than
+guessed, in [DriverSpec](DriverSpec.md). The measurements reorder what follows:
+Redis Streams costs four times what NATS does, and the `database/sql` client
+costs nothing at all.
+
 **NATS JetStream** first: its publish-ack maps directly onto the confirmed
 publication the dispatcher already requires, so the driver is about three
 hundred lines plus integration tests. **Redis Streams** next — `XADD` is
 inherently acknowledged. **SQS/SNS** after that, if anyone asks.
 
-**A `database/sql` producer client.** `pkg/outboxclient` is pgx-only, which
-excludes every team on `sqlx`, `gorm` or the standard library. The insert is six
-columns; the client is thin. It widens adoption for an afternoon of work.
+**A `database/sql` producer client** — done, not yet released.
+[`pkg/outboxsql`](../pkg/outboxsql) is the same client against `database/sql`,
+importing no driver at all, and costing the daemon nothing because the daemon
+does not import it.
 
 ---
 

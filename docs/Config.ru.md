@@ -152,7 +152,7 @@ OUTBOX_DRIVER_RMQ_LOCAL_PREFIX=loc
 `OUTBOX_DRIVER_…`.
 
 Разобранный пример со всеми подводными камнями — в
-[сценарии 5](UseCases.ru.md#5-четыре-стрима-на-трёх-инстансах-rabbitmq).
+[сценария 5](usecases/5-multi-rabbitmq.ru.md).
 
 ### Общее для всех драйверов
 

@@ -151,7 +151,7 @@ Driver names that differ only in a `-` versus a
 `_` are rejected at startup, because both address the same `OUTBOX_DRIVER_…` block.
 
 The worked example, with what to watch out for, is
-[use case 5](UseCases.md#5-four-streams-across-three-rabbitmq-instances).
+[use case 5](usecases/5-multi-rabbitmq.md).
 
 ### Common to every driver
 

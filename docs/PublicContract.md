@@ -44,9 +44,10 @@ VALUES (gen_random_uuid(), 'local', 'account.debited',
 COMMIT;
 ```
 
-From Go, use [`pkg/outboxclient`](../pkg/outboxclient), which takes the
-transaction as an argument so the transactional part is not something to
-remember.
+From Go, use [`pkg/outboxclient`](../pkg/outboxclient) on pgx or
+[`pkg/outboxsql`](../pkg/outboxsql) on `database/sql`. Both take the transaction
+as an argument, so the transactional part is not something to remember, and
+neither can be used correctly without one.
 
 ### 1.2 Returning a failed message to the queue
 

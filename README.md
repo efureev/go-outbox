@@ -69,7 +69,7 @@ application beyond one `INSERT`.
   misspelled driver key, three drivers each missing a DSN — so a misconfigured
   deployment takes one restart to diagnose rather than one per mistake.
 
-- **Proven, not asserted.** 178 tests, half of them against real PostgreSQL, RabbitMQ
+- **Proven, not asserted.** 194 tests, half of them against real PostgreSQL, RabbitMQ
   and Redpanda, because a set of concurrency rules expressed in SQL cannot be checked
   by a mock that matches query text.
 
@@ -253,8 +253,10 @@ Metrics, starting alert rules and a Grafana dashboard to import
 
 ## Documentation
 
-- [Use cases](docs/UseCases.md) — complete recipes: Laravel under Docker, a VDS
-  with supervisord, Kubernetes with autoscaling, bare metal with systemd.
+- [Use cases](docs/UseCases.md) — six complete recipes, one page each: Laravel
+  under Docker, a VDS with supervisord, Kubernetes with autoscaling, bare metal
+  with systemd, four streams across three brokers, and a Go producer on
+  `database/sql`.
 - [Public contract](docs/PublicContract.md) — the columns a producer writes, the
   routing rules, and what is explicitly not guaranteed.
 - [Configuration](docs/Config.md) — every environment variable.
@@ -264,6 +266,8 @@ Metrics, starting alert rules and a Grafana dashboard to import
   something is wrong.
 - [Roadmap](docs/Roadmap.md) — what has shipped, what comes next in the order it
   would be built, and what is deliberately not planned.
+- [Driver spec](docs/DriverSpec.md) — what adding a broker takes, and what each
+  candidate costs in binary size.
 
 ## Development
 

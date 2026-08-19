@@ -6,6 +6,31 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **`pkg/outboxsql`**, the producer client for everybody not on pgx. `pkg/outboxclient` takes a
+  `pgx.Tx`, which is the wrong dependency to force on a codebase that chose `sqlx`, `gorm` or the
+  standard library. The new one takes anything with `ExecContext` and imports no driver at all.
+
+  It is a package of its own rather than another constructor in `outboxclient`, because importing
+  that package brings pgx with it — which is the thing being avoided. The two `Message` types are
+  therefore duplicated, and a test compares them by reflection so the copies cannot drift apart
+  unnoticed.
+
+  It costs the daemon nothing: `go list -deps ./cmd/outbox` does not contain either package, and
+  the binary measures 21.87 MB before and after. Integration tests cover both PostgreSQL drivers a
+  `database/sql` user realistically holds — `lib/pq` and `pgx/v5/stdlib` — including a payload of
+  arbitrary non-UTF-8 bytes and a `jsonb` round trip. The recipe is
+  [use case 6](docs/usecases/6-database-sql.md).
+
+### Changed
+
+- **The use cases are one page each**, in [docs/usecases](docs/usecases), with
+  [docs/UseCases.md](docs/UseCases.md) as the index. The single document had reached seven hundred
+  lines and six recipes, which is past the point where anybody reads it end to end. Every recipe is
+  carried over unchanged.
+
+
 ## [1.5.0] — 2026-08-19
 
 Two things a deployment reaches for once it is large enough to need them: a trace that shows where
@@ -120,7 +145,7 @@ running is what was built.
   There is no key to distribute or to lose: cosign gets a short-lived certificate against the
   workflow's OIDC identity, and what a verifier establishes is that this repository, on this
   workflow, produced the artefact. Verification commands are in
-  [docs/UseCases.md](docs/UseCases.md#install).
+  [docs/usecases/2-vds-supervisord.md](docs/usecases/2-vds-supervisord.md#install).
 
   Tool versions are pinned, and cosign's own download is checked against a recorded hash. Fetching a
   signing tool over the network without checking what came back would be an odd way to start
@@ -261,7 +286,7 @@ Fixes found by reviewing the 1.0.0 release, and the tests that now hold them in 
 - **`Endpoint()` on every driver**, reported by `GET /api/v1/stats` with credentials stripped.
   Without it two drivers pointed at different brokers rendered identically, so the response could
   not be used to confirm that a stream reaches the instance it was meant to.
-- **The three-RabbitMQ use case** in [docs/UseCases.md](docs/UseCases.md), and a README rewritten
+- **The three-RabbitMQ use case** in [docs/usecases](docs/UseCases.md), and a README rewritten
   to lead with what the dispatcher does rather than with how it is built.
 
 ### Fixed
