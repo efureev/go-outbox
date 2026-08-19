@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.2.0] — 2026-08-19
+
 ### Added
 
 - **An unreachable broker no longer spends a message's retry budget.** Every failure used to
@@ -64,6 +66,34 @@ All notable changes to this project are documented here. The format follows
   replaces the two `requeue` functions so they clear it along with everything else they reset. It
   is additive: existing rows read `NULL`, which is what "nothing is waiting on a broker" means.
 
+
+## [1.1.0] — 2026-08-19
+
+Fixes found by reviewing the 1.0.0 release, and the tests that now hold them in place.
+
+### Added
+
+- **A breakable TCP proxy in the integration tests**, and five resilience scenarios built on it:
+  two of three brokers failing and recovering, PostgreSQL going away, everything going away at
+  once, an outage outlasting the retry budget, and a broker unreachable at startup. Severing a
+  connection is a truer fault than stopping a container, and it is reversible mid-test.
+- **`Endpoint()` on every driver**, reported by `GET /api/v1/stats` with credentials stripped.
+  Without it two drivers pointed at different brokers rendered identically, so the response could
+  not be used to confirm that a stream reaches the instance it was meant to.
+- **The three-RabbitMQ use case** in [docs/UseCases.md](docs/UseCases.md), and a README rewritten
+  to lead with what the dispatcher does rather than with how it is built.
+
+### Fixed
+
+- **Colliding driver names are rejected at startup.** `rmq-local` and `rmq_local` normalised to the
+  same environment prefix, so one driver's configuration silently overwrote the other's.
+- **Every driver is now attempted before configuration fails.** Stopping at the first bad driver
+  turned fixing a routing table with several brokers into one restart per mistake; the failures are
+  reported together.
+- **The status gauges are sampled by every replica.** They were refreshed only by whichever
+  instance held the janitor's advisory lock, so the backlog appeared to be zero on every other
+  replica — and on all of them whenever the lock holder was between sweeps.
+- **`driversOf` returns a stable order**, so the stats response does not reshuffle between scrapes.
 
 ## [1.0.0] — 2026-08-19
 
