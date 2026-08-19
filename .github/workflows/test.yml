@@ -38,6 +38,7 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
+          check-latest: true
 
       # Redpanda is not a GitHub service container: it needs arguments, and a
       # service container cannot take a command.
@@ -80,6 +81,12 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
+          # go.mod says "go 1.26", and without this the action takes whatever
+          # patch the runner happens to have cached. That is how a run went
+          # green on 1.26.6 and red on 1.26.5 with the same code: the standard
+          # library's own advisories are fixed by a patch release, so which one
+          # you get decides whether govulncheck has anything to report.
+          check-latest: true
       # The same target a developer runs. govulncheck reports only the
       # vulnerabilities the code actually reaches, so a finding here is one
       # somebody has to act on rather than a line in an advisory feed.
@@ -92,6 +99,7 @@ jobs:
       - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
+          check-latest: true
       - uses: golangci/golangci-lint-action@v9
         with:
           version: v2.12

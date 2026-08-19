@@ -68,6 +68,16 @@ The broker stops being mandatory. A dispatcher can now deliver into a table — 
   [dead letters in a table rather than a topic](docs/usecases/9-dlq-table.md) — which needs no code
   change, because the forwarder already publishes through the router.
 
+### Fixed
+
+- **CI builds against the current Go patch release.** `go.mod` says `go 1.26`, and without
+  `check-latest` the action takes whatever patch the runner had cached — which is how the same
+  commit went green on 1.26.6 and red on 1.26.5. Standard library advisories are fixed by patch
+  releases, so which one a run gets decided whether `govulncheck` had anything to report. It now
+  applies to the release workflow too, where the stake is higher: a release could otherwise ship
+  binaries built against a known-vulnerable `crypto/tls` on a day the cache happened to be stale,
+  and nothing in the pipeline would have said so.
+
 ### Changed
 
 - `config.DBConfig.ConnString` replaces the unexported DSN assembly in `internal/store`. The pool

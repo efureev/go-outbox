@@ -33,6 +33,12 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
+          # Which patch release builds the binaries must not be left to whatever
+          # the runner had cached. A standard library advisory is fixed by a
+          # patch, so without this a release can ship with known-vulnerable
+          # crypto/tls on a day the cache happened to be stale — and nothing in
+          # this pipeline would say so.
+          check-latest: true
 
       # The same target a developer runs, so what ships is what was tested.
       # SBOM=1 additionally writes a CycloneDX document per binary, describing
