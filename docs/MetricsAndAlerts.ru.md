@@ -51,6 +51,8 @@
 | `outbox_db_errors_total`         | counter | op                          | Отказы базы, по операциям.                                  |
 | `outbox_dlq_published_total`     | counter | stream, result              | Попытки пересылки в dead-letter.                            |
 | `outbox_retention_deleted_total` | counter | —                           | Доставленных строк удалено при очистке.                     |
+| `outbox_partitions_dropped_total`  | counter   | —                       | Суточных партиций удалено retention'ом. Партиционированный аналог `outbox_retention_deleted_total`, который считает строки. |
+| `outbox_default_partition_rows`    | gauge     | —                       | Строки, попавшие в партицию по умолчанию, потому что суточной партиции на их день не было. Должно быть нулём: партиция по умолчанию спасла транзакцию продюсера, но теперь эти строки мешают создать правильную партицию для их диапазона. |
 
 ## Как читать их вместе
 

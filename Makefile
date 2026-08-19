@@ -27,6 +27,9 @@ BENCHTIME     ?= 3000x
 BENCHLATENCY  ?= 200x
 BENCHLOGGING  ?= 200000x
 BENCHCOUNT    ?= 3
+# How long `make soak` breaks things for. It is not a CI job: the point is to
+# run the real timings for longer than a test suite ever would.
+SOAK          ?= 1h
 VERSION    ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 COMMIT     ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo none)
 BUILD_DATE ?= $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
@@ -57,6 +60,11 @@ test-integration: ## Run the integration tests (needs `make up`)
 	go test -race -tags integration -timeout 10m ./test/integration/...
 
 test-all: test test-integration ## Run every test
+
+soak: ## Run the resilience scenarios under load for SOAK (default 1h; needs `make up`)
+	@printf 'soaking for %s — interrupt with Ctrl-C\n' "$(SOAK)"
+	OUTBOX_SOAK_DURATION=$(SOAK) go test -tags 'integration soak' \
+		-run TestSoak -timeout 0 -v ./test/integration/...
 
 bench: bench-logging bench-throughput bench-latency ## Run every benchmark (the last two need `make up`)
 

@@ -323,6 +323,9 @@ func (r *housekeepingRecorder) stats() []events.Stats {
 	return append([]events.Stats(nil), r.samples...)
 }
 
+// Partitions is not observed here; the interface asks for it.
+func (*housekeepingRecorder) Partitions(context.Context, events.Partitions) {}
+
 func (r *housekeepingRecorder) reclaimed() int {
 	r.mu.Lock()
 	defer r.mu.Unlock()

@@ -16,6 +16,13 @@ type Housekeeper interface {
 	Stats(ctx context.Context) (store.Stats, error)
 	Purge(ctx context.Context, retention time.Duration, limit int) (int64, error)
 	TryLock(ctx context.Context, class, key int32) (release func(), ok bool, err error)
+
+	// The partition side. Only reached on a range-partitioned table, which is
+	// something the janitor asks about rather than being told.
+	IsPartitioned(ctx context.Context) (bool, error)
+	EnsurePartitions(ctx context.Context, ahead int) ([]string, error)
+	DropExpiredPartitions(ctx context.Context, retention time.Duration) ([]string, error)
+	DefaultPartitionRows(ctx context.Context) (int64, error)
 }
 
 // JanitorEmitter publishes what the janitor observes.
@@ -23,6 +30,7 @@ type JanitorEmitter interface {
 	Reclaimed(ctx context.Context, ev events.Reclaimed)
 	Stats(ctx context.Context, ev events.Stats)
 	Retention(ctx context.Context, ev events.Retention)
+	Partitions(ctx context.Context, ev events.Partitions)
 }
 
 // Task identifiers, used as the second half of the advisory lock key so the
@@ -172,6 +180,18 @@ func (j *Janitor) Sweep(ctx context.Context) {
 	}
 
 	j.exclusive(ctx, taskRetention, "retention", func(ctx context.Context) error {
+		// Asked every sweep rather than cached. It is one catalogue row every
+		// few minutes, on the single replica holding the lock, and it means
+		// converting the table does not need the dispatcher restarted to be
+		// noticed.
+		partitioned, err := j.store.IsPartitioned(ctx)
+		if err != nil {
+			return err
+		}
+		if partitioned {
+			return j.maintainPartitions(ctx)
+		}
+
 		var total int64
 
 		for {
@@ -202,6 +222,60 @@ func (j *Janitor) Sweep(ctx context.Context) {
 
 		return nil
 	})
+}
+
+// maintainPartitions is retention on a partitioned table: create the days that
+// are coming, drop the ones nothing needs any more.
+//
+// The saving is the whole reason for partitioning. A chunked DELETE has to find
+// every row, mark it dead and wait for autovacuum to reclaim the space; past
+// roughly ten million rows a day it stops keeping up and the table grows while
+// apparently being cleaned. Dropping a partition is a catalogue change and an
+// unlink, and costs the same whatever it held.
+func (j *Janitor) maintainPartitions(ctx context.Context) error {
+	created, err := j.store.EnsurePartitions(ctx, j.cfg.PartitionAhead)
+	if err != nil {
+		return err
+	}
+
+	dropped, err := j.store.DropExpiredPartitions(ctx, j.cfg.Retention)
+	if err != nil {
+		return err
+	}
+
+	orphans, err := j.store.DefaultPartitionRows(ctx)
+	if err != nil {
+		return err
+	}
+
+	// EnsurePartitions reports every day it covered, including the ones that
+	// already existed, so a steady state would otherwise say something on every
+	// sweep. Only a change or a problem is worth reporting.
+	if len(dropped) == 0 && orphans == 0 {
+		return nil
+	}
+
+	j.emitter.Partitions(ctx, events.Partitions{
+		Created: len(created), Dropped: len(dropped), DefaultRows: orphans,
+	})
+
+	if len(dropped) > 0 {
+		j.log.Info("partitions dropped",
+			slog.Int("count", len(dropped)),
+			slog.Duration("retention", j.cfg.Retention),
+		)
+	}
+	if orphans > 0 {
+		// The default partition did its job — the producer's transaction
+		// committed — but those rows now sit in the way of creating the proper
+		// partition for their range.
+		j.log.Warn("rows landed in the default partition: a daily partition was missing",
+			slog.Int64("rows", orphans),
+			slog.Int("partition_ahead", j.cfg.PartitionAhead),
+		)
+	}
+
+	return nil
 }
 
 // exclusive runs fn only if this replica wins the advisory lock for the task.

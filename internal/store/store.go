@@ -26,6 +26,12 @@ type Store struct {
 	pool  *pgxpool.Pool
 	q     queries
 	table string
+	// schema and tableName are kept apart from the qualified name because
+	// partition maintenance builds child table names from them, and taking
+	// them back apart from the quoted form would mean parsing what was just
+	// assembled.
+	schema    string
+	tableName string
 }
 
 // New builds a Store for the configured schema and table. Both identifiers are
@@ -35,7 +41,13 @@ type Store struct {
 func New(pool *pgxpool.Pool, cfg config.DBConfig) *Store {
 	table := fmt.Sprintf("%q.%q", cfg.Schema, cfg.Table)
 
-	return &Store{pool: pool, q: newQueries(quoteIdent(cfg.Schema), table), table: table}
+	return &Store{
+		pool:      pool,
+		q:         newQueries(quoteIdent(cfg.Schema), table),
+		table:     table,
+		schema:    quoteIdent(cfg.Schema),
+		tableName: cfg.Table,
+	}
 }
 
 // Pool exposes the underlying pool for the listener, which needs a dedicated

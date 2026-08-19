@@ -151,6 +151,15 @@ type JanitorConfig struct {
 	// against a table that only grows.
 	StatsInterval time.Duration `env:"STATS_INTERVAL,default=30s"`
 
+	// PartitionAhead is how many days of partitions to keep created in advance
+	// when the outbox table is range-partitioned. It is ignored otherwise.
+	//
+	// Running ahead is not tidiness. A row that fits no partition is a failed
+	// INSERT, and that INSERT sits inside the producer's business transaction —
+	// so a missing partition does not delay a message, it rolls back whatever
+	// the application was doing. Three days means the janitor can be stopped
+	// over a weekend without anybody noticing.
+	PartitionAhead int `env:"PARTITION_AHEAD,default=3"`
 	// Retention is how long a delivered row is kept. Zero disables purging.
 	Retention         time.Duration `env:"RETENTION,default=168h"`
 	RetentionInterval time.Duration `env:"RETENTION_INTERVAL,default=5m"`

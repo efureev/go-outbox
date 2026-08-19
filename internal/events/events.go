@@ -22,7 +22,20 @@ var (
 	TopicRetention  = msghub.NewTopic[Retention]("outbox.retention")
 	TopicDeadLetter = msghub.NewTopic[DeadLetter]("outbox.dead_letter")
 	TopicBreaker    = msghub.NewTopic[Breaker]("outbox.breaker")
+	TopicPartitions = msghub.NewTopic[Partitions]("outbox.partitions")
 )
+
+// Partitions reports one round of partition maintenance on a range-partitioned
+// outbox table. Emitted only when something changed or something is wrong, so a
+// steady state is silent.
+type Partitions struct {
+	Created int
+	Dropped int
+	// DefaultRows is what landed in the catch-all partition. It should be zero:
+	// anything else means a row arrived for a day nobody had created a
+	// partition for, and those rows now block creating the proper one.
+	DefaultRows int64
+}
 
 // Breaker reports that a stream has stopped, or resumed, claiming work.
 //

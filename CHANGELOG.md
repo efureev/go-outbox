@@ -8,6 +8,46 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **Range partitioning, for deployments past roughly ten million rows a day.** At that volume the
+  retention sweep stops keeping up: a chunked `DELETE` creates dead tuples faster than autovacuum
+  reclaims them, so the table grows while apparently being cleaned. Partitioning by `created_at`
+  turns the same work into `DROP TABLE` — a catalogue change and an unlink, costing the same
+  whatever the partition held.
+
+  It is opt-in and needs no fork of the migration set: apply
+  [`migrations/partitioned/messages.sql`](migrations/partitioned/messages.sql) to an empty database
+  and the released migrations run over it unchanged, because 0001 creates the table only
+  `IF NOT EXISTS` and its indexes are created on the parent and propagated. The dispatcher notices
+  the shape of the table by itself and switches retention from deleting rows to dropping
+  partitions; every query it runs is the same either way, because partitioning is transparent to
+  DML.
+
+  A partition is dropped only when everything in it has been delivered *and* the most recent
+  delivery is past retention. Neither half follows from the partition's bounds — those are on
+  `created_at` while retention is on `dispatched_at` — so a partition full of week-old messages may
+  still hold one that failed and is waiting for somebody. The shipped schema also carries a default
+  partition, because a row that fits no partition is a failed `INSERT` inside the producer's
+  business transaction: a stopped janitor must cost a warning, not a rolled-back application.
+
+  `OUTBOX_JANITOR_PARTITION_AHEAD` (`3`) is how many days are kept created in front.
+  `outbox_partitions_dropped_total` and `outbox_default_partition_rows` report what happens.
+
+  **It changes the primary key**, which the roadmap said it would not. PostgreSQL requires a unique
+  constraint on a partitioned table to include the partition key, so `id` alone cannot be the
+  primary key and becomes `(id, created_at)`: the database no longer enforces that an id appears
+  once across the whole table, only once per day. Consumers already deduplicate on the message id
+  under at-least-once delivery, so nothing breaks, but it is a guarantee given up rather than a
+  detail. Measured on 405k rows across 31 daily partitions, claiming executes in about 0.25 ms
+  against 0.18 ms unpartitioned; planning goes from 0.4 ms to 2 ms and is paid once, since pgx
+  prepares its statements.
+
+- **`make soak`** — the resilience scenarios under continuous load for as long as you are willing to
+  wait, behind its own build tag so it never runs by accident. The ordinary resilience tests break
+  one thing, observe and heal, which establishes that each failure is handled but not that the
+  dispatcher survives them overlapping while work keeps arriving. A 45-second run inserted 2,249
+  messages while both brokers and the database were broken in rotation, and delivered every one of
+  them.
+
 - **An `outbox.publish` span per message, closing the gap in the producer's trace.** A producer's
   span ends when its transaction commits and a consumer's starts when the broker hands it a
   message; between them is an interval exactly the width of the outbox lag, which a metric can size

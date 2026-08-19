@@ -20,7 +20,7 @@ would land rather than when.
 | A Grafana dashboard as JSON | **Shipped in 1.4.0** |
 | Supply-chain hygiene in CI | **Shipped in 1.4.0** |
 | OpenTelemetry spans | **Done**, not yet released |
-| Table partitioning, and a soak target | Planned — 1.6 |
+| Table partitioning, and a soak target | **Done**, not yet released |
 | NATS JetStream, Redis Streams, a `database/sql` client | Planned — 1.7 |
 | Per-key ordering | Planned — 2.0 |
 
@@ -105,22 +105,29 @@ estimate on this page is written by the same hand.
 
 ## 1.6 — volume
 
-**Table partitioning.** Documented in Operations, not shipped. Above roughly ten
-million rows a day the retention sweep becomes the bottleneck: a chunked
-`DELETE` generates dead tuples faster than autovacuum reclaims them, and the
-table stops shrinking. Daily range partitioning by `created_at` turns retention
-into `DROP TABLE` — constant time, no vacuum.
+**Done, not yet released**, and one claim on this page was wrong.
 
-The care is in the claim query: it filters on `status`, `stream` and
-`available_at`, none of which is the partition key, so it must not be allowed to
-degrade into a scan of every live partition. Shipping this means an alternative
-migration set, a janitor task that creates partitions ahead and drops them
-behind, and a benchmark proving claim latency is unchanged. It is the largest
-item here that changes no semantics.
+Partitioning ships as an opt-in schema rather than an alternative migration set:
+apply [`migrations/partitioned/messages.sql`](../migrations/partitioned/messages.sql)
+first and the released migrations run over it unchanged. The dispatcher notices
+the shape of the table and drops partitions instead of deleting rows.
 
-**A soak target.** `make soak` — the resilience scenarios run for an hour under
-continuous load rather than for the seconds CI allows. Not a CI job; the thing
-you run before trusting a release with someone's money.
+This page called it "the largest item here that changes no semantics". It does
+change one. PostgreSQL requires a unique constraint on a partitioned table to
+include the partition key, so `id` alone cannot be the primary key and becomes
+`(id, created_at)` — the database stops enforcing that an id appears once across
+the whole table. Nothing breaks, because consumers deduplicate on the message id
+under at-least-once delivery, but it is a guarantee given up.
+
+The claim query held up: about 0.25 ms across 31 daily partitions against
+0.18 ms unpartitioned, because the partial indexes on older partitions are empty
+and merging across them costs almost nothing.
+
+`make soak` runs the resilience scenarios under load for as long as it is told
+to, behind its own build tag.
+
+Details in [the changelog](../CHANGELOG.md) and
+[Operations](Operations.md#partitioning-past-roughly-ten-million-rows-a-day).
 
 ---
 

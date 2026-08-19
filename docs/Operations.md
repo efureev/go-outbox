@@ -173,9 +173,58 @@ Check `OUTBOX_JANITOR_RETENTION` is not `0` and that
 table, and it only removes delivered rows — a growing `failed` population is a
 different problem, and the failed listing is where to look.
 
-Beyond roughly ten million rows a day, consider range-partitioning by
-`created_at` and dropping whole partitions instead. The dispatcher does not
-require it and does not ship it.
+### Partitioning, past roughly ten million rows a day
+
+At that volume the sweep stops keeping up: a chunked `DELETE` creates dead
+tuples faster than autovacuum reclaims them, so the table keeps growing while
+apparently being cleaned. Range-partitioning by `created_at` turns the same work
+into `DROP TABLE` — a catalogue change and an unlink, costing the same whatever
+the partition held.
+
+It is opt-in and it is a deliberate migration. Apply the shipped schema against
+an empty database *before* the ordinary migrations, which then run over it
+unchanged:
+
+```bash
+psql "$DSN" -f migrations/partitioned/messages.sql
+outbox migrate up
+```
+
+The dispatcher notices the shape of the table by itself. Retention switches from
+deleting rows to dropping partitions, and the janitor keeps
+`OUTBOX_JANITOR_PARTITION_AHEAD` days (`3`) created in front of itself. Every
+query it runs is unchanged: partitioning is transparent to DML.
+
+**A partition is only dropped when everything in it has been delivered** and the
+most recent delivery is past retention. Both halves matter and neither follows
+from the partition's bounds: those are on `created_at` while retention is on
+`dispatched_at`, so a partition full of week-old messages may still hold one that
+failed and is waiting for somebody. Dropping by age alone would delete it.
+
+**The default partition is why a missing daily partition is a warning rather
+than an outage.** A row that fits no partition is a failed `INSERT`, and that
+`INSERT` is inside the producer's business transaction — so a janitor that
+stopped running would not delay messages, it would roll back whatever the
+application was doing. Rows that land there are counted by
+`outbox_default_partition_rows` and reported in the log, because until they are
+moved the proper partition for their range cannot be created.
+
+Two things it costs, both worth knowing before deciding:
+
+- **The primary key changes.** PostgreSQL requires a unique constraint on a
+  partitioned table to include the partition key, so `id` alone cannot be the
+  primary key and becomes `(id, created_at)`. The database no longer enforces
+  that an id appears once across the whole table — only once per day. Consumers
+  already deduplicate on the message id under at-least-once delivery, so nothing
+  breaks, but it is a guarantee given up rather than a detail.
+- **Planning gets more expensive, execution barely moves.** Measured on 405k
+  rows across 31 daily partitions: the claim query executes in about 0.25 ms
+  against 0.18 ms unpartitioned, because the partial indexes on older partitions
+  are empty and merging across them costs almost nothing. Planning goes from
+  0.4 ms to 2 ms — paid once, since pgx prepares its statements, after which it
+  is 0.29 ms.
+
+Below ten million rows a day the ordinary table is simpler and behaves better.
 
 ### Shutdown
 

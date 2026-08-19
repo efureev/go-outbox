@@ -100,6 +100,12 @@ type Metrics struct {
 	BrokerErrors     *prometheus.CounterVec
 	DBErrors         *prometheus.CounterVec
 	RetentionDeleted prometheus.Counter
+
+	// PartitionsDropped and DefaultPartitionRows only move on a range-
+	// partitioned table, which is the shape a deployment past roughly ten
+	// million rows a day needs and nobody else should adopt.
+	PartitionsDropped    prometheus.Counter
+	DefaultPartitionRows prometheus.Gauge
 }
 
 // New builds the metric set on reg and pre-creates the series for every
@@ -182,6 +188,17 @@ func New(reg prometheus.Registerer, brokers config.BrokerConfig) *Metrics {
 		Help: "1 while the dispatcher has stopped claiming for a stream because its broker is " +
 			"unreachable. Claims resume on their own once one gets through.",
 	}, []string{"stream"})
+	m.PartitionsDropped = prometheus.NewCounter(prometheus.CounterOpts{
+		Namespace: namespace, Name: "partitions_dropped_total",
+		Help: "Daily partitions removed by retention. The partitioned equivalent of " +
+			"outbox_retention_deleted_total, which counts rows.",
+	})
+	m.DefaultPartitionRows = prometheus.NewGauge(prometheus.GaugeOpts{
+		Namespace: namespace, Name: "default_partition_rows",
+		Help: "Rows that landed in the catch-all partition because no daily partition covered " +
+			"their day. Should be zero: the default partition kept the producer's transaction " +
+			"from failing, but those rows now block creating the proper partition for their range.",
+	})
 	m.RetentionDeleted = prometheus.NewCounter(prometheus.CounterOpts{
 		Namespace: namespace, Name: "retention_deleted_total",
 		Help: "Delivered rows removed by the retention sweep.",
@@ -193,7 +210,7 @@ func New(reg prometheus.Registerer, brokers config.BrokerConfig) *Metrics {
 		m.BrokerErrors, m.DBErrors,
 		m.PublishDuration, m.IterationDuration, m.BatchSize, m.DeliveryLag, m.ReclaimedAge,
 		m.OldestPendingAge, m.MessagesByStatus, m.MessagesDeferredNow, m.StreamPaused,
-		m.RetentionDeleted,
+		m.RetentionDeleted, m.PartitionsDropped, m.DefaultPartitionRows,
 	)
 
 	m.preCreate()

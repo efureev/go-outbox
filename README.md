@@ -69,7 +69,7 @@ application beyond one `INSERT`.
   misspelled driver key, three drivers each missing a DSN — so a misconfigured
   deployment takes one restart to diagnose rather than one per mistake.
 
-- **Proven, not asserted.** 172 tests, half of them against real PostgreSQL, RabbitMQ
+- **Proven, not asserted.** 178 tests, half of them against real PostgreSQL, RabbitMQ
   and Redpanda, because a set of concurrency rules expressed in SQL cannot be checked
   by a mock that matches query text.
 
@@ -271,6 +271,7 @@ Metrics, starting alert rules and a Grafana dashboard to import
 make up                 # start PostgreSQL, RabbitMQ and Redpanda
 make test               # unit tests
 make test-integration   # integration tests against the real thing
+make soak SOAK=1h       # the same failures, under load, for as long as you like
 make bench              # the numbers quoted in the changelog
 make lint               # golangci-lint, in a container pinned to the CI version
 make fmt

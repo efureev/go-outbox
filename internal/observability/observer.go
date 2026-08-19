@@ -44,8 +44,13 @@ func Subscribe(mod *appmod.BaseAppModule, hub *msghub.Hub, m *Metrics) error {
 		return err
 	}
 
-	return hubmod.SubscribeModule(mod, hub, events.TopicBreaker,
-		m.onBreaker, msghub.Synchronous())
+	if err := hubmod.SubscribeModule(mod, hub, events.TopicBreaker,
+		m.onBreaker, msghub.Synchronous()); err != nil {
+		return err
+	}
+
+	return hubmod.SubscribeModule(mod, hub, events.TopicPartitions,
+		m.onPartitions, msghub.Synchronous())
 }
 
 func (m *Metrics) onIteration(_ context.Context, ev events.Iteration) error {
@@ -125,6 +130,13 @@ func (m *Metrics) onStats(_ context.Context, ev events.Stats) error {
 		Deferred:      ev.Deferred,
 		OldestPending: ev.OldestPending,
 	})
+
+	return nil
+}
+
+func (m *Metrics) onPartitions(_ context.Context, ev events.Partitions) error {
+	m.PartitionsDropped.Add(float64(ev.Dropped))
+	m.DefaultPartitionRows.Set(float64(ev.DefaultRows))
 
 	return nil
 }

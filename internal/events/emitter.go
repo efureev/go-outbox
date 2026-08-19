@@ -38,6 +38,11 @@ func (e *Emitter) Stats(ctx context.Context, ev Stats) {
 	emit(e, ctx, TopicStats, ev)
 }
 
+// Partitions announces a round of partition maintenance.
+func (e *Emitter) Partitions(ctx context.Context, ev Partitions) {
+	emit(e, ctx, TopicPartitions, ev)
+}
+
 // Retention announces a sweep of delivered rows.
 func (e *Emitter) Retention(ctx context.Context, ev Retention) {
 	emit(e, ctx, TopicRetention, ev)

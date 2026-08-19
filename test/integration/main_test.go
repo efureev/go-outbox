@@ -109,6 +109,43 @@ func newFixture(t testing.TB) *fixture {
 	}
 }
 
+// newBareFixture is newFixture without the migrations, for the one case that
+// has to create the table itself: a partitioned outbox, which an operator
+// creates before the migration set runs over it.
+func newBareFixture(t testing.TB) *fixture {
+	t.Helper()
+
+	schema := fmt.Sprintf("outbox_test_%d_%d", os.Getpid(), schemaCounter.Add(1))
+	cfg := baseConfig(schema)
+	ctx := t.Context()
+
+	pool, err := store.NewPool(ctx, cfg.DB, "outbox-test")
+	if err != nil {
+		t.Fatalf("open pool: %v", err)
+	}
+
+	t.Cleanup(func() {
+		dropCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+		defer cancel()
+
+		if _, err := pool.Exec(dropCtx, fmt.Sprintf("DROP SCHEMA IF EXISTS %q CASCADE", schema)); err != nil {
+			t.Logf("drop schema %s: %v", schema, err)
+		}
+		pool.Close()
+	})
+
+	if _, err := pool.Exec(ctx, fmt.Sprintf("CREATE SCHEMA IF NOT EXISTS %q", schema)); err != nil {
+		t.Fatalf("create schema: %v", err)
+	}
+
+	return &fixture{
+		Pool:   pool,
+		Store:  store.New(pool, cfg.DB),
+		Config: cfg,
+		Schema: schema,
+	}
+}
+
 func baseConfig(schema string) config.Config {
 	cfg := config.Config{}
 	cfg.DB.DSN = dsn()

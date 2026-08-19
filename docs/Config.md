@@ -228,6 +228,7 @@ Each cycle takes a PostgreSQL advisory lock, so it runs on one replica per cycle
 | `OUTBOX_JANITOR_RECLAIM_INTERVAL`   | `30s`       | How often expired leases are returned to the queue.                                                                      |
 | `OUTBOX_JANITOR_STATS_INTERVAL`     | `30s`       | Gauge refresh. Deliberately slower than the poll loop: the counts come from partial indexes, but they are still queries. |
 | `OUTBOX_JANITOR_RETENTION`          | `168h`      | How long a delivered row is kept. `0` disables purging — and the table then grows without bound.                         |
+| `OUTBOX_JANITOR_PARTITION_AHEAD`     | `3`          | Days of partitions to keep created in advance on a range-partitioned table; ignored otherwise. A row that fits no partition is a failed `INSERT` inside the producer's transaction. |
 | `OUTBOX_JANITOR_RETENTION_INTERVAL` | `5m`        |                                                                                                                          |
 | `OUTBOX_JANITOR_RETENTION_BATCH`    | `5000`      | Rows per DELETE, so the transaction stays short.                                                                         |
 | `OUTBOX_JANITOR_LOCK_KEY`           | `809021150` | Advisory lock namespace.                                                                                                 |

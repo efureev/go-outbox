@@ -53,6 +53,8 @@ whatever it likes into the `stream` column.
 | `outbox_db_errors_total` | counter | op | Database failures, by operation. |
 | `outbox_dlq_published_total` | counter | stream, result | Dead-letter forwarding attempts. |
 | `outbox_retention_deleted_total` | counter | — | Delivered rows removed by the sweep. |
+| `outbox_partitions_dropped_total` | counter | — | Daily partitions removed by retention. The partitioned equivalent of `outbox_retention_deleted_total`, which counts rows. |
+| `outbox_default_partition_rows` | gauge | — | Rows that landed in the catch-all partition because no daily partition covered their day. Should be zero: the default partition kept the producer's transaction from failing, but those rows now block creating the proper partition for their range. |
 
 ## Reading them together
 

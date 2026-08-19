@@ -51,6 +51,7 @@ func (c Config) validate(prior error) error {
 	c.validateDispatch(add)
 	c.validateJanitor(add)
 	c.validatePorts(add)
+	c.validateJanitorPartitions(add)
 	c.validateOTel(add)
 	c.validateBrokers(add, prior != nil)
 
@@ -59,6 +60,12 @@ func (c Config) validate(prior error) error {
 	}
 
 	return fmt.Errorf("invalid configuration:\n  - %s", joinErrors(errs, "\n  - "))
+}
+
+func (c Config) validateJanitorPartitions(add func(string, ...any)) {
+	if c.Janitor.PartitionAhead < 0 {
+		add("OUTBOX_JANITOR_PARTITION_AHEAD must not be negative, got %d", c.Janitor.PartitionAhead)
+	}
 }
 
 func (c Config) validateOTel(add func(string, ...any)) {

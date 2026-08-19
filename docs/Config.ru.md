@@ -230,6 +230,7 @@ OUTBOX_DRIVER_RMQ_LOCAL_PREFIX=loc
 | `OUTBOX_JANITOR_RECLAIM_INTERVAL`   | `30s`        | Как часто истёкшие lease возвращаются в очередь.                                                                      |
 | `OUTBOX_JANITOR_STATS_INTERVAL`     | `30s`        | Обновление gauge-метрик. Намеренно реже poll-цикла: счётчики берутся по частичным индексам, но это всё равно запросы. |
 | `OUTBOX_JANITOR_RETENTION`          | `168h`       | Сколько хранится доставленная строка. `0` отключает очистку — и тогда таблица растёт неограниченно.                   |
+| `OUTBOX_JANITOR_PARTITION_AHEAD`     | `3`          | На сколько дней вперёд держать созданными партиции на range-партиционированной таблице; иначе игнорируется. Строка, не попавшая ни в одну партицию, — неудачный `INSERT` внутри транзакции продюсера. |
 | `OUTBOX_JANITOR_RETENTION_INTERVAL` | `5m`         |                                                                                                                       |
 | `OUTBOX_JANITOR_RETENTION_BATCH`    | `5000`       | Строк за один DELETE, чтобы транзакция оставалась короткой.                                                           |
 | `OUTBOX_JANITOR_LOCK_KEY`           | `809021150`  | Пространство имён advisory lock'а.                                                                                    |
