@@ -25,8 +25,23 @@ type httpModule struct {
 	health  func(context.Context) error
 	started time.Time
 	version versionInfo
-	store   *store.Store
+	store   outboxReader
 }
+
+// outboxReader is the database side of the admin API: the four calls the
+// handlers make and nothing else.
+//
+// It is an interface for the same reason dispatch.Store is one — the handlers
+// depend on four behaviours, not on a connection pool, and a narrow seam is what
+// lets them be tested against httptest with no database at all.
+type outboxReader interface {
+	Stats(ctx context.Context) (store.Stats, error)
+	ListFailed(ctx context.Context, after store.Cursor, limit int, stream string) ([]store.FailedMessage, error)
+	Requeue(ctx context.Context, ids []string) ([]string, error)
+	RequeueFailedBefore(ctx context.Context, before time.Time, limit int) ([]string, error)
+}
+
+var _ outboxReader = (*store.Store)(nil)
 
 func newHTTPModule(cfg config.Config, log *slog.Logger) *httpModule {
 	m := &httpModule{

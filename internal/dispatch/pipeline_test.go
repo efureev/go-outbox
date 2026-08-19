@@ -30,6 +30,12 @@ type fakeStore struct {
 	nackResult store.NackResult
 	claimErr   error
 	limits     core.RetryLimits
+
+	// onClaim runs after a claim is recorded. A shutdown that begins here is
+	// deterministic, where one timed from outside is a race: the publish loop
+	// dispatches every chunk without blocking, so a cancellation aimed between
+	// two iterations almost always arrives after the last of them.
+	onClaim func()
 }
 
 func (f *fakeStore) Claim(_ context.Context, _ string, _ int, lease core.Lease) ([]core.Message, error) {
@@ -48,6 +54,10 @@ func (f *fakeStore) Claim(_ context.Context, _ string, _ int, lease core.Lease) 
 
 	batch := f.batches[0]
 	f.batches = f.batches[1:]
+
+	if f.onClaim != nil {
+		f.onClaim()
+	}
 
 	return batch, nil
 }
@@ -354,54 +364,47 @@ func TestLeaseConflictsAreReported(t *testing.T) {
 
 // A shutdown that lands mid-batch must hand the untried tail back, so another
 // replica takes it now rather than after the lease expires.
-func TestShutdownReleasesUnattemptedClaims(t *testing.T) {
-	st := &fakeStore{batches: [][]core.Message{batch(9, 0)}}
-
-	blocked := make(chan struct{})
-	router := &fakeRouter{errFor: map[string]error{}, block: blocked}
-
-	p := newPipeline(st, router, &recorder{})
-
+// The guarantee the README sells: "a clean shutdown does not even wait for the
+// lease to expire — it hands unfinished claims straight back".
+//
+// The shutdown begins inside the claim, which is what makes this deterministic.
+// Timed from outside it is a race the test loses almost every time: the publish
+// loop dispatches every chunk without blocking, so a cancellation aimed between
+// two iterations lands after the last one, nothing is left unattempted, and the
+// assertion passes without the released path ever running.
+func TestShutdownHandsUnfinishedClaimsBack(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
+	st := &fakeStore{batches: [][]core.Message{batch(9, 0)}, onClaim: cancel}
+	rec := &recorder{}
 
-		_, _ = p.RunOnce(ctx)
-	}()
+	p := newPipeline(st, &fakeRouter{errFor: map[string]error{}}, rec)
 
-	// Let the first chunks start, then shut down and let them finish.
-	time.Sleep(20 * time.Millisecond)
-	cancel()
-	close(blocked)
-
-	select {
-	case <-done:
-	case <-time.After(5 * time.Second):
-		t.Fatal("RunOnce did not return after cancellation")
+	if _, err := p.RunOnce(ctx); err != nil {
+		t.Fatalf("RunOnce: %v", err)
 	}
 
 	st.mu.Lock()
 	defer st.mu.Unlock()
 
-	// Whatever was not attempted must have been handed back rather than left
-	// leased.
-	attempted := 0
-	for _, ids := range st.acked {
-		attempted += len(ids)
-	}
-	for _, outcomes := range st.nacked {
-		attempted += len(outcomes)
-	}
-	releasedCount := 0
+	var handed int
 	for _, ids := range st.released {
-		releasedCount += len(ids)
+		handed += len(ids)
+	}
+	if handed != 9 {
+		t.Fatalf("handed back %d of 9 claims; the rest stay leased until the lease expires", handed)
 	}
 
-	if attempted+releasedCount != 9 {
-		t.Errorf("%d messages accounted for (%d written back, %d released), want all 9",
-			attempted+releasedCount, attempted, releasedCount)
+	// Handing back is not failing. Those messages were never attempted, so
+	// nothing about them may be written as an outcome — an attempt spent here
+	// would be an attempt nobody made.
+	if len(st.acked) != 0 || len(st.nacked) != 0 {
+		t.Errorf("untried messages were written back: acked %v, nacked %v", st.acked, st.nacked)
+	}
+
+	// Reported, so the condition is visible rather than inferred from a gap.
+	if ev := rec.last(t); ev.Released != 9 {
+		t.Errorf("the iteration reports %d released claims, want 9", ev.Released)
 	}
 }
 
