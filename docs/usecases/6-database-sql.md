@@ -100,10 +100,31 @@ err := outbox.EnqueueBatch(ctx, tx, []outboxsql.Message{
 ```
 
 `EnqueueBatch` is one statement per message rather than one round trip for all
-of them: pgx has a batch protocol and `database/sql` has none. At a handful of
-messages per business transaction that is not worth a thought. A producer
-writing hundreds at a time should be on `pkg/outboxclient` and pgx, where the
-batch is a single round trip.
+of them: pgx has a batch protocol and `database/sql` has none.
+
+Measured, per message ([Benchmarks](../Benchmarks.md)):
+
+| Messages per transaction | `outboxclient.EnqueueBatch` | a loop, either client |
+|---|---|---|
+| 1 | 1.3 ms | 1.7–1.8 ms |
+| 10 | 128 µs | ~200 µs |
+| 100 | 33 µs | ~116 µs |
+| 500 | 25 µs | ~110 µs |
+
+**At a handful of messages per business transaction this is not worth a
+thought.** At one message all of it is the commit; at ten the difference across
+a whole transaction is under a millisecond.
+
+**At hundreds it is.** Five hundred messages cost 55 ms in a loop against 12.5 ms
+in a batch — 43 ms added to a transaction a user is waiting on. A producer
+writing that many at a time should be calling `pkg/outboxclient`'s
+`EnqueueBatch`, where the batch is a single round trip.
+
+Note what the numbers do *not* say. Being on pgx buys nothing by itself: at the
+same number of round trips `database/sql` and pgx are indistinguishable, 116
+against 116 microseconds at a hundred messages. The batch protocol is the whole
+difference, so switching clients without calling `EnqueueBatch` changes
+nothing.
 
 ### Delaying a message
 
@@ -146,8 +167,9 @@ it has to be, because the dispatcher is.
   Check `GET /api/v1/stats`, which reports the table the dispatcher is claiming
   from.
 - **Expecting `EnqueueBatch` to be one round trip.** It is not, and on a hot path
-  writing many messages per transaction that shows up as latency. That is the
-  cost of not depending on pgx.
+  writing many messages per transaction that shows up as latency — measured, 43 ms
+  on a transaction carrying five hundred messages. That is the cost of not
+  depending on pgx, and it is only worth paying attention to at that scale.
 - **Setting `ID` yourself with a UUIDv4.** Leave it empty and the client
   generates a v7, which sorts by creation time and keeps the primary key index
   append-ordered instead of scattering writes across the whole tree.

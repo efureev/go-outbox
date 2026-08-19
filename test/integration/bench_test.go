@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/efureev/go-outbox/internal/broker"
+	"github.com/efureev/go-outbox/internal/broker/postgres"
 	"github.com/efureev/go-outbox/internal/broker/rabbitmq"
 	"github.com/efureev/go-outbox/internal/config"
 	"github.com/efureev/go-outbox/internal/core"
@@ -51,13 +52,33 @@ type benchSink struct {
 }
 
 var benchSinks = []benchSink{
-	// The dispatcher and PostgreSQL alone: claim, write back, and the work in
-	// between, with the broker taken out of the picture. This is the part the
-	// project actually controls, so it is the one to watch for regressions.
-	{"postgres", func(testing.TB, *fixture, ...string) dispatch.Router { return discardRouter{} }},
+	// The dispatcher and its own table alone: claim, write back, and the work in
+	// between, with no destination at all. This is the part the project actually
+	// controls, so it is the one to watch for regressions, and it is the ceiling
+	// every real destination is measured against.
+	{"none", func(testing.TB, *fixture, ...string) dispatch.Router { return discardRouter{} }},
 
 	// End to end, publisher confirms and all. Dominated by the broker.
 	{"rabbitmq", benchRabbitRouter},
+
+	// The inbox driver: delivery is an INSERT into a table rather than a
+	// publication. Alongside rabbitmq this is the measurement behind the claim
+	// that a broker is not a mandatory dependency of the product.
+	{"postgres", benchInboxRouter},
+}
+
+func sink(tb testing.TB, name string) benchSink {
+	tb.Helper()
+
+	for _, s := range benchSinks {
+		if s.name == name {
+			return s
+		}
+	}
+
+	tb.Fatalf("no benchmark sink named %q", name)
+
+	return benchSink{}
 }
 
 var benchWorkers = []int{1, 4, 8}
@@ -79,7 +100,7 @@ func BenchmarkDrain(b *testing.B) {
 func BenchmarkDrainBatchSize(b *testing.B) {
 	for _, size := range []int{25, 100, 200, 500} {
 		b.Run(fmt.Sprintf("batch=%d", size), func(b *testing.B) {
-			benchmarkDrain(b, benchSinks[0], 4, "OUTBOX_DISPATCH_BATCH_SIZE="+itoa(size))
+			benchmarkDrain(b, sink(b, "none"), 4, "OUTBOX_DISPATCH_BATCH_SIZE="+itoa(size))
 		})
 	}
 }
@@ -91,7 +112,7 @@ func BenchmarkDrainBatchSize(b *testing.B) {
 func BenchmarkDrainChannels(b *testing.B) {
 	for _, channels := range []int{1, 4, 8, 16} {
 		b.Run(fmt.Sprintf("channels=%d", channels), func(b *testing.B) {
-			benchmarkDrain(b, benchSinks[1], 8, "OUTBOX_DRIVER_RMQ_CHANNELS="+itoa(channels))
+			benchmarkDrain(b, sink(b, "rabbitmq"), 8, "OUTBOX_DRIVER_RMQ_CHANNELS="+itoa(channels))
 		})
 	}
 }
@@ -325,3 +346,71 @@ func seedBulk(tb testing.TB, f *fixture, n int) {
 }
 
 func itoa(n int) string { return strconv.Itoa(n) }
+
+// benchInboxRouter delivers into a PostgreSQL table through the inbox driver,
+// which is what "the broker is not a mandatory dependency" means in practice.
+//
+// The table lives in the fixture's own schema. That is the cheapest arrangement
+// rather than the representative one — a real deployment puts it in another
+// database — so the figure is the driver's floor, not a promise about a
+// deployment with a network in the middle.
+func benchInboxRouter(tb testing.TB, f *fixture, tune ...string) dispatch.Router {
+	tb.Helper()
+
+	_, err := f.Pool.Exec(tb.Context(), fmt.Sprintf(`
+		CREATE TABLE IF NOT EXISTS %s.inbox (
+		    id      UUID PRIMARY KEY,
+		    stream  TEXT  NOT NULL,
+		    topic   TEXT  NOT NULL,
+		    payload BYTEA NOT NULL,
+		    headers JSONB NOT NULL DEFAULT '{}'::jsonb,
+		    received_at TIMESTAMPTZ NOT NULL DEFAULT now()
+		)`, quoted(f.Schema)))
+	if err != nil {
+		tb.Fatalf("create the inbox: %v", err)
+	}
+
+	cfg := benchConfig(tb, f, append([]string{
+		"OUTBOX_STREAM_LOCAL_DRIVER=inbox",
+		"OUTBOX_DRIVER_INBOX_TYPE=postgres",
+		"OUTBOX_DRIVER_INBOX_SCHEMA=" + f.Schema,
+		"OUTBOX_DRIVER_INBOX_TABLE=inbox",
+	}, tune...)...)
+
+	driver, ok := cfg.Brokers.Drivers["inbox"].(*config.PostgresDriver)
+	if !ok {
+		tb.Fatalf("driver is %T, want *config.PostgresDriver", cfg.Brokers.Drivers["inbox"])
+	}
+
+	publisher, err := postgres.New(tb.Context(), driver, logging.Nop())
+	if err != nil {
+		tb.Fatalf("open the inbox publisher: %v", err)
+	}
+	tb.Cleanup(func() { _ = publisher.Close(context.WithoutCancel(tb.Context())) })
+
+	router, err := broker.NewRouter(cfg.Brokers, map[string]broker.Publisher{"inbox": publisher})
+	if err != nil {
+		tb.Fatalf("router: %v", err)
+	}
+
+	return router
+}
+
+// BenchmarkDrainDestination is the comparison behind "a broker is not a
+// mandatory dependency": the same drain, the same dispatcher, three
+// destinations.
+//
+//	none      the dispatcher and its own table, so the ceiling
+//	postgres  the inbox driver, one INSERT for the whole batch
+//	rabbitmq  a real broker with publisher confirms
+//
+// Read the gap between none and each destination, not the absolute figures.
+//
+//	go test -tags integration -run '^$' -bench BenchmarkDrainDestination -benchtime 5000x ./test/integration/
+func BenchmarkDrainDestination(b *testing.B) {
+	for _, name := range []string{"none", "postgres", "rabbitmq"} {
+		b.Run(name, func(b *testing.B) {
+			benchmarkDrain(b, sink(b, name), 4)
+		})
+	}
+}

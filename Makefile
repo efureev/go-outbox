@@ -26,6 +26,8 @@ CYCLONEDX   ?= github.com/CycloneDX/cyclonedx-gomod/cmd/cyclonedx-gomod@v1.11.0
 BENCHTIME     ?= 3000x
 BENCHLATENCY  ?= 200x
 BENCHLOGGING  ?= 200000x
+BENCHENQUEUE  ?= 200x
+BENCHSTORE    ?= 20000x
 BENCHCOUNT    ?= 3
 # How long `make soak` breaks things for. It is not a CI job: the point is to
 # run the real timings for longer than a test suite ever would.
@@ -42,7 +44,7 @@ LDFLAGS := -s -w \
 	-X 'main.date=$(BUILD_DATE)'
 
 .DEFAULT_GOAL := help
-.PHONY: help build run test test-integration test-all bench bench-logging bench-throughput bench-latency dist cover lint lint-host fmt fmt-host tidy up down logs psql image clean clean-cache
+.PHONY: help build run test test-integration test-all bench bench-logging bench-throughput bench-latency bench-destination bench-enqueue bench-store dist cover lint lint-host fmt fmt-host tidy up down logs psql image clean clean-cache
 
 help: ## List the available targets
 	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z_-]+:.*?## / {printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -66,7 +68,7 @@ soak: ## Run the resilience scenarios under load for SOAK (default 1h; needs `ma
 	OUTBOX_SOAK_DURATION=$(SOAK) go test -tags 'integration soak' \
 		-run TestSoak -timeout 0 -v ./test/integration/...
 
-bench: bench-logging bench-throughput bench-latency ## Run every benchmark (the last two need `make up`)
+bench: bench-logging bench-throughput bench-latency bench-destination bench-enqueue bench-store ## Run every benchmark (all but the first need `make up`)
 
 bench-logging: ## Benchmark what a log line costs (no infrastructure needed)
 	go test -run '^$$' -bench . -benchtime $(BENCHLOGGING) -count $(BENCHCOUNT) ./internal/logging/...
@@ -78,6 +80,18 @@ bench-throughput: ## Benchmark sustained delivery
 bench-latency: ## Benchmark insert-to-broker latency
 	go test -tags integration -run '^$$' -bench 'BenchmarkNotifyLatency' \
 		-benchtime $(BENCHLATENCY) -count $(BENCHCOUNT) -timeout 60m ./test/integration/...
+
+bench-destination: ## Benchmark the same drain into no destination, a table and a broker
+	go test -tags integration -run '^$$' -bench 'BenchmarkDrainDestination' \
+		-benchtime $(BENCHTIME) -count $(BENCHCOUNT) -timeout 60m ./test/integration/...
+
+bench-enqueue: ## Benchmark the producer's cost: outboxclient against outboxsql
+	go test -tags integration -run '^$$' -bench 'BenchmarkEnqueue' \
+		-benchtime $(BENCHENQUEUE) -count $(BENCHCOUNT) -timeout 60m ./test/integration/...
+
+bench-store: ## Benchmark claim and write-back alone, with no destination at all
+	go test -tags integration -run '^$$' -bench 'BenchmarkStore' \
+		-benchtime $(BENCHSTORE) -count $(BENCHCOUNT) -timeout 60m ./test/integration/...
 
 cover: ## Run every test with coverage
 	go test -race -tags integration -timeout 10m -covermode=atomic \

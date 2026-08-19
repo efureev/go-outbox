@@ -268,6 +268,8 @@ Metrics, starting alert rules and a Grafana dashboard to import
   would be built, and what is deliberately not planned.
 - [Driver spec](docs/DriverSpec.md) — what adding a broker takes, and what each
   candidate costs in binary size.
+- [Benchmarks](docs/Benchmarks.md) — every figure the README and the changelog
+  quote, with the benchmark that produced it.
 
 ## Development
 
