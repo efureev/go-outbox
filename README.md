@@ -249,6 +249,8 @@ Metrics and starting alert rules: [docs/MetricsAndAlerts.md](docs/MetricsAndAler
 - [Metrics and alerts](docs/MetricsAndAlerts.md).
 - [Operations](docs/Operations.md) — deploying, scaling, and what to do when
   something is wrong.
+- [Roadmap](docs/Roadmap.md) — what has shipped, what comes next in the order it
+  would be built, and what is deliberately not planned.
 
 ## Development
 

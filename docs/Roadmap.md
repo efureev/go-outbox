@@ -2,48 +2,72 @@
 
 [Русская версия](Roadmap.ru.md)
 
-1.0.0 is released and does what it promises. What follows is what I would build
-next, in the order I would build it — with the reasoning for the *order*, not
-just the ordering. Each item states what it changes, why it earns its place, and
-what it costs.
+1.3.0 is released. What follows is what I would build next, in the order I would
+build it — with the reasoning for the *order*, not just the ordering. Each item
+states what it changes, why it earns its place, and what it costs.
 
 This is a proposal, not a commitment. Dates are deliberately absent: the
-sequence is the useful part.
+sequence is the useful part, and the version numbers below say where an item
+would land rather than when.
+
+## Status
+
+| Item | Status |
+|---|---|
+| An outage must not spend the retry budget | **Shipped in 1.2.0** |
+| Stop claiming for a stream whose broker is unreachable | **Shipped in 1.3.0** |
+| CLI parity with the admin API | Planned — 1.4 |
+| A Grafana dashboard as JSON | Planned — 1.4 |
+| Supply-chain hygiene in CI | Planned — 1.4 |
+| OpenTelemetry spans | Planned — 1.5 |
+| Table partitioning, and a soak target | Planned — 1.6 |
+| NATS JetStream, Redis Streams, a `database/sql` client | Planned — 1.7 |
+| Per-key ordering | Planned — 2.0 |
+
+What is deliberately **not** on the list, and the reasoning for each refusal, is
+in [Not planned, and why](#not-planned-and-why).
 
 ---
 
-## Done: an outage no longer spends the retry budget
+## Shipped
 
-The first item on this page has shipped. Every failure used to advance the
-attempt counter, so at the default backoff a twenty-minute broker restart moved
-every message in flight to `failed` and asked an operator to requeue them by
-hand — although the broker never saw one of them.
+**An outage no longer spends the retry budget** — 1.2.0. Every failure used to
+advance the attempt counter, so at the default backoff a twenty-minute broker
+restart moved every message in flight to `failed` and asked an operator to
+requeue them by hand — although the broker never saw one of them. Failures to
+reach a broker are now classified apart from failures the broker reported. Such
+a message returns to `pending` with its attempt counter untouched and waits out
+the outage; `OUTBOX_DISPATCH_MAX_DEFER` bounds the wait for streams that would
+rather fail than be late. The attempt counter measures rejections, not minutes.
 
-Failures to reach a broker are now classified apart from failures the broker
-reported. Such a message returns to `pending` with its attempt counter untouched
-and waits out the outage; `OUTBOX_DISPATCH_MAX_DEFER` bounds the wait for streams
-that would rather fail than be late. The attempt counter measures rejections,
-not minutes.
+**Claiming stops while a broker is down** — 1.3.0. The saving is not in the
+retries: a deferred message is already rescheduled a backoff into the future, so
+retrying an outage is self-limiting. It is in the arrivals — every insert during
+an outage used to wake the pipeline through `LISTEN`/`NOTIFY` and become a
+failed publish at once.
 
-Claiming stops too while a broker is down, which is the second item off this
-page. The saving is not in the retries — a deferred message is already
-rescheduled a backoff into the future — but in the arrivals: every insert during
-an outage used to wake the pipeline and become a failed publish at once.
+Two notes on how these landed, because both differ from what this page
+predicted.
 
-The design landed differently from the sketch here. It reads the result of an
-ordinary claim rather than the connection supervisor's state, because publishing
-is the capability that matters and a health check is only a proxy for it — one
-that can be green while the exchange the messages need is not there.
+The breaker reads the result of an ordinary claim rather than the connection
+supervisor's state, as sketched. Publishing is the capability that matters, and
+a health check is only a proxy for it — one that can be green while the exchange
+the messages need is not there.
+
+And the two shipped as 1.2.0 and 1.3.0 rather than inside one release, which is
+why the milestones below start at 1.4. Version numbers on a roadmap are a guess
+at grouping, and this one was wrong in a way worth leaving visible.
 
 Details in [the changelog](../CHANGELOG.md) and
 [Operations](Operations.md#claiming-stops-while-a-broker-is-down).
 
 ---
 
-## 1.1 — surviving an outage
+## 1.4 — finishing the operational round
 
-The theme is: an unavailable dependency should cost you latency, never data or
-an operator's evening.
+The two items that made an outage survivable have shipped. What is left of this
+round is the part an operator touches: the tools they reach for at three in the
+morning, and the evidence that what they are running is what was built.
 
 **CLI parity with the admin API.** `outbox failed`, `outbox requeue`,
 `outbox stats` as subcommands, reading the same DSN as the daemon. Requeuing
@@ -61,7 +85,7 @@ stops mattering only if nobody else ever runs this.
 
 ---
 
-## 1.2 — closing the hole in the trace
+## 1.5 — closing the hole in the trace
 
 The producer's span ends at commit. The consumer's span starts at receive.
 Between them is a gap exactly the width of the outbox lag — the one interval
@@ -80,7 +104,7 @@ exporter costs nothing when `OUTBOX_OTEL_ENDPOINT` is unset.
 
 ---
 
-## 1.3 — volume
+## 1.6 — volume
 
 **Table partitioning.** Documented in Operations, not shipped. Above roughly ten
 million rows a day the retention sweep becomes the bottleneck: a chunked
@@ -101,7 +125,7 @@ you run before trusting a release with someone's money.
 
 ---
 
-## 1.4 — more destinations
+## 1.7 — more destinations
 
 `broker.Publisher` exists precisely so that this is cheap, and a driver is the
 clearest way to prove the interface was worth having.
