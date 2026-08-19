@@ -92,6 +92,11 @@ func newResilient(t *testing.T, streams []string, tune ...string) *resilient {
 		"OUTBOX_DISPATCH_BACKOFF_BASE=200ms",
 		"OUTBOX_DISPATCH_BACKOFF_MAX=400ms",
 		"OUTBOX_DISPATCH_BACKOFF_JITTER=0",
+		// Finding a broker gone pauses claiming for that stream. These tests pass
+		// at the shipped ceiling too; it is lowered so their recovery assertions
+		// wait on the proxy being healed rather than on a half-minute timer that
+		// has nothing to do with what they are testing.
+		"OUTBOX_DISPATCH_PAUSE_MAX=200ms",
 		"OUTBOX_DISPATCH_WRITE_BACK_TIMEOUT=5s",
 	}
 

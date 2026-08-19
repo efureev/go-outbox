@@ -48,6 +48,11 @@ func (e *Emitter) DeadLetter(ctx context.Context, ev DeadLetter) {
 	emit(e, ctx, TopicDeadLetter, ev)
 }
 
+// Breaker announces that a stream stopped or resumed claiming work.
+func (e *Emitter) Breaker(ctx context.Context, ev Breaker) {
+	emit(e, ctx, TopicBreaker, ev)
+}
+
 // emit is a function rather than a method because Go has no generic methods:
 // the payload type comes from the topic, and a method cannot carry a type
 // parameter.

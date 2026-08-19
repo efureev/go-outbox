@@ -51,7 +51,7 @@ application beyond one `INSERT`.
   that takes. No table full of `failed` rows to requeue by hand after a twenty-minute
   restart.
 
-- **Tells you what happened.** 19 Prometheus metrics, including the one that actually
+- **Tells you what happened.** 20 Prometheus metrics, including the one that actually
   matters: how long the oldest undelivered message has waited. Failed messages are
   listable and requeueable over HTTP, so nobody writes an `UPDATE` by hand.
 
@@ -64,7 +64,7 @@ application beyond one `INSERT`.
   misspelled driver key, three drivers each missing a DSN — so a misconfigured
   deployment takes one restart to diagnose rather than one per mistake.
 
-- **Proven, not asserted.** 146 tests, half of them against real PostgreSQL, RabbitMQ
+- **Proven, not asserted.** 156 tests, half of them against real PostgreSQL, RabbitMQ
   and Redpanda, because a set of concurrency rules expressed in SQL cannot be checked
   by a mock that matches query text.
 

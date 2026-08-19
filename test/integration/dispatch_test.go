@@ -120,12 +120,15 @@ func TestEndToEndInsertReachesTheBroker(t *testing.T) {
 	// A routing envelope, so the naming and key path is exercised too.
 	id := h.insert(t, "local", topic, []byte(`{"order":"A-1"}`), &core.Target{Key: "customer-1"})
 
-	claimed, err := h.Pipeline.RunOnce(t.Context())
+	res, err := h.Pipeline.RunOnce(t.Context())
 	if err != nil {
 		t.Fatalf("RunOnce: %v", err)
 	}
-	if claimed != 1 {
-		t.Fatalf("claimed %d messages, want 1", claimed)
+	if res.Claimed != 1 {
+		t.Fatalf("claimed %d messages, want 1", res.Claimed)
+	}
+	if res.Delivered != 1 {
+		t.Fatalf("delivered %d messages, want 1", res.Delivered)
 	}
 
 	got := consumeOne(t, h.queueFor(topic))

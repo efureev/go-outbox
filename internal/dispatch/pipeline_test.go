@@ -149,6 +149,7 @@ func (r *fakeRouter) DriverFor(string) (string, bool) { return "test-driver", tr
 type recorder struct {
 	mu         sync.Mutex
 	iterations []events.Iteration
+	breakers   []events.Breaker
 }
 
 func (r *recorder) Iteration(_ context.Context, ev events.Iteration) {
@@ -156,6 +157,13 @@ func (r *recorder) Iteration(_ context.Context, ev events.Iteration) {
 	defer r.mu.Unlock()
 
 	r.iterations = append(r.iterations, ev)
+}
+
+func (r *recorder) Breaker(_ context.Context, ev events.Breaker) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	r.breakers = append(r.breakers, ev)
 }
 
 func (r *recorder) last(t *testing.T) events.Iteration {
@@ -215,12 +223,12 @@ func TestRunOnceAcksEveryDeliveredMessage(t *testing.T) {
 
 	p := newPipeline(st, &fakeRouter{errFor: map[string]error{}}, rec)
 
-	claimed, err := p.RunOnce(t.Context())
+	res, err := p.RunOnce(t.Context())
 	if err != nil {
 		t.Fatalf("RunOnce: %v", err)
 	}
-	if claimed != 5 {
-		t.Fatalf("claimed = %d, want 5", claimed)
+	if res.Claimed != 5 {
+		t.Fatalf("claimed = %d, want 5", res.Claimed)
 	}
 
 	if len(st.acked) != 1 || len(st.acked[0]) != 5 {
@@ -516,12 +524,12 @@ func TestEmptyClaimEmitsNothing(t *testing.T) {
 
 	p := newPipeline(&fakeStore{}, &fakeRouter{errFor: map[string]error{}}, rec)
 
-	claimed, err := p.RunOnce(t.Context())
+	res, err := p.RunOnce(t.Context())
 	if err != nil {
 		t.Fatalf("RunOnce: %v", err)
 	}
-	if claimed != 0 {
-		t.Errorf("claimed = %d, want 0", claimed)
+	if res.Claimed != 0 {
+		t.Errorf("claimed = %d, want 0", res.Claimed)
 	}
 
 	rec.mu.Lock()

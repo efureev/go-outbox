@@ -6,6 +6,44 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.3.0] — 2026-08-19
+
+### Added
+
+- **The dispatcher stops claiming for a stream whose broker is unreachable.** Finding a broker gone
+  used to change nothing about the loop: it kept claiming a batch, failing to publish it and writing
+  the failure back for the whole outage.
+
+  What that cost was not the retries. A deferred message is rescheduled a backoff into the future,
+  so retrying an outage is self-limiting. New messages are not — every insert arriving while the
+  broker is down wakes the pipeline through `LISTEN`/`NOTIFY` and was claimed, attempted and written
+  back at once. The load removed is proportional to how busy the producer is rather than to how long
+  the outage lasts.
+
+  The pause starts at one poll interval and doubles up to `OUTBOX_DISPATCH_PAUSE_MAX` (`30s`), and
+  one ordinary claim is let through each time it elapses. The trial is a real batch rather than a
+  health check on purpose: publishing is the capability that matters, and a health check is only a
+  proxy for it — one that can be green while the exchange the messages need is not there. A wake-up
+  is not allowed past the pause, since it carries no information the breaker does not already have.
+
+  The ceiling matches the delay the RabbitMQ supervisor backs off to between reconnection attempts,
+  so pausing adds nothing to how soon a returning broker is noticed. `0` restores the previous
+  behaviour, which is also how the tests prove the pause is what makes the difference.
+
+- **`outbox_stream_paused{stream}`**, `1` while a stream has stopped claiming. This is not
+  decoration: while claims are held back nothing is published, so `outbox_messages_deferred_total`
+  stops advancing precisely when an outage is most established. The gauge is the signal that
+  outlives the condition it reports.
+
+### Changed
+
+- The shipped `OutboxBrokerUnreachable` alert now joins `outbox_stream_paused` with the deferral
+  rate. On the rate alone it would have cleared itself a minute into every outage it exists to
+  report.
+- `Pipeline.RunOnce` returns a `dispatch.Result` — claimed, delivered and deferred — instead of a
+  bare count, so the run loop can tell an outage from a batch that simply failed.
+
+
 ## [1.2.0] — 2026-08-19
 
 ### Added

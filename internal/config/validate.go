@@ -127,6 +127,9 @@ func (c Config) validateDispatch(add func(string, ...any)) {
 		add("OUTBOX_DISPATCH_MAX_DEFER (%s) must not be below OUTBOX_DISPATCH_BACKOFF_BASE (%s), "+
 			"otherwise a deferred message fails before it is retried once", d.MaxDefer, d.BackoffBase)
 	}
+	if d.PauseMax < 0 {
+		add("OUTBOX_DISPATCH_PAUSE_MAX must not be negative, got %s", d.PauseMax)
+	}
 	if d.PollInterval <= 0 {
 		add("OUTBOX_DISPATCH_POLL_INTERVAL must be positive, got %s", d.PollInterval)
 	}

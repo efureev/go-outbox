@@ -232,6 +232,9 @@ func (c *deliveryCounter) Iteration(_ context.Context, ev events.Iteration) {
 	}
 }
 
+// Breaker is not observed here; the interface asks for it.
+func (*deliveryCounter) Breaker(context.Context, events.Breaker) {}
+
 // await blocks until at least target messages have been delivered.
 func (c *deliveryCounter) await(tb testing.TB, target int64, within time.Duration) {
 	tb.Helper()

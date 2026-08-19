@@ -85,6 +85,12 @@ type Metrics struct {
 	// says how long the oldest has waited.
 	OldestPendingAge prometheus.Gauge
 	MessagesByStatus *prometheus.GaugeVec
+	// StreamPaused is 1 while a stream has stopped claiming work because its
+	// broker is unreachable. It is the signal that survives the condition it
+	// reports: once claims are held back nothing is published, so
+	// MessagesDeferred stops advancing precisely when the outage is most
+	// established.
+	StreamPaused *prometheus.GaugeVec
 	// MessagesDeferredNow is how many rows are waiting on a broker that could
 	// not be reached, right now. Together with the backlog age it separates a
 	// dispatcher that is behind from one that is blocked: the first drains once
@@ -171,6 +177,11 @@ func New(reg prometheus.Registerer, brokers config.BrokerConfig) *Metrics {
 		Help: "Messages currently held back because their broker could not be reached. A subset " +
 			"of the pending and processing counts, not a status of its own.",
 	})
+	m.StreamPaused = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Namespace: namespace, Name: "stream_paused",
+		Help: "1 while the dispatcher has stopped claiming for a stream because its broker is " +
+			"unreachable. Claims resume on their own once one gets through.",
+	}, []string{"stream"})
 	m.RetentionDeleted = prometheus.NewCounter(prometheus.CounterOpts{
 		Namespace: namespace, Name: "retention_deleted_total",
 		Help: "Delivered rows removed by the retention sweep.",
@@ -181,7 +192,8 @@ func New(reg prometheus.Registerer, brokers config.BrokerConfig) *Metrics {
 		m.MessagesReclaimed, m.MessagesDeferred, m.LeaseConflicts, m.DLQPublished,
 		m.BrokerErrors, m.DBErrors,
 		m.PublishDuration, m.IterationDuration, m.BatchSize, m.DeliveryLag, m.ReclaimedAge,
-		m.OldestPendingAge, m.MessagesByStatus, m.MessagesDeferredNow, m.RetentionDeleted,
+		m.OldestPendingAge, m.MessagesByStatus, m.MessagesDeferredNow, m.StreamPaused,
+		m.RetentionDeleted,
 	)
 
 	m.preCreate()
@@ -199,6 +211,7 @@ func (m *Metrics) preCreate() {
 	for _, stream := range m.knownStreams {
 		m.MessagesReclaimed.WithLabelValues(stream)
 		m.LeaseConflicts.WithLabelValues(stream)
+		m.StreamPaused.WithLabelValues(stream)
 
 		for _, driver := range m.knownDrivers {
 			m.MessagesDispatched.WithLabelValues(stream, driver)

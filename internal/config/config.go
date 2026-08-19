@@ -106,6 +106,25 @@ type DispatchConfig struct {
 	BackoffBase   time.Duration `env:"BACKOFF_BASE,default=1m"`
 	BackoffMax    time.Duration `env:"BACKOFF_MAX,default=1h"`
 	BackoffJitter float64       `env:"BACKOFF_JITTER,default=0.2"`
+	// PauseMax is the longest the dispatcher waits before trying a stream whose
+	// broker is unreachable again.
+	//
+	// Finding a broker gone stops the pipeline claiming for that stream: the
+	// pause starts at one poll interval and doubles up to this ceiling, and one
+	// ordinary claim is let through each time it elapses. Retries are already
+	// self-limiting — a deferred message is rescheduled a backoff into the
+	// future — but new messages are not, and every insert that arrives during an
+	// outage would otherwise be claimed, attempted and written back at once.
+	//
+	// The default matches the ceiling the RabbitMQ supervisor backs off to
+	// between reconnection attempts. Trying more often than the driver itself
+	// retries only produces trials that find the connection still being rebuilt,
+	// so a shorter pause buys no recovery speed — the driver's own backoff, not
+	// this, is what bounds how soon a returning broker is noticed.
+	//
+	// Zero disables it: the loop keeps claiming throughout an outage, which is
+	// the behaviour before this existed.
+	PauseMax time.Duration `env:"PAUSE_MAX,default=30s"`
 	// PublishTimeout bounds a single publish call.
 	PublishTimeout time.Duration `env:"PUBLISH_TIMEOUT,default=15s"`
 	// WriteBackTimeout bounds the database call that records the outcome. It

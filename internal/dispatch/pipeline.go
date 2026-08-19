@@ -38,6 +38,7 @@ type Router interface {
 // without a bus.
 type Emitter interface {
 	Iteration(ctx context.Context, ev events.Iteration)
+	Breaker(ctx context.Context, ev events.Breaker)
 }
 
 // Pipeline dispatches one stream.
@@ -52,6 +53,7 @@ type Pipeline struct {
 	cfg     config.DispatchConfig
 	backoff core.BackoffPolicy
 	owner   string
+	breaker *breaker
 
 	// wake carries "there is work" from the notification listener. Capacity
 	// one, because the signal is idempotent: two notifications and one mean the
@@ -83,10 +85,29 @@ func New(
 			Max:    cfg.Dispatch.BackoffMax,
 			Jitter: cfg.Dispatch.BackoffJitter,
 		},
-		owner: cfg.App.Instance,
-		wake:  make(chan struct{}, 1),
+		owner:   cfg.App.Instance,
+		breaker: newBreaker(cfg.Dispatch.PollInterval, cfg.Dispatch.PauseMax),
+		wake:    make(chan struct{}, 1),
 	}
 }
+
+// Result summarises one cycle in the terms the run loop needs: whether more
+// work is waiting, and whether the broker answered at all.
+type Result struct {
+	// Claimed is the batch size. A batch that keeps arriving full means the
+	// dispatcher is not keeping up.
+	Claimed int
+	// Delivered counts messages a broker accepted.
+	Delivered int
+	// Deferred counts messages held back because the broker could not be
+	// reached.
+	Deferred int
+}
+
+// unreachable reports a cycle in which the broker took nothing and the reason
+// was that it could not be reached. One message getting through is enough to
+// say the broker is there, whatever happened to the rest.
+func (r Result) unreachable() bool { return r.Deferred > 0 && r.Delivered == 0 }
 
 // Stream reports which stream this pipeline serves.
 func (p *Pipeline) Stream() string { return p.stream }
@@ -111,15 +132,27 @@ func (p *Pipeline) Run(ctx context.Context) error {
 	defer ticker.Stop()
 
 	for {
-		claimed, err := p.RunOnce(ctx)
-		switch {
-		case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
-			return nil
-		case err != nil:
-			p.log.Error("iteration failed", slog.Any("error", err))
-		case claimed >= p.cfg.BatchSize:
-			// A full batch means more is waiting. Do not sleep on a backlog.
-			continue
+		// A wake-up from LISTEN/NOTIFY is not allowed past the breaker. It
+		// carries no information the breaker does not already have — that a
+		// message exists, which is exactly what cannot be delivered right now.
+		if !p.breaker.blocks(time.Now()) {
+			res, err := p.RunOnce(ctx)
+			switch {
+			case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
+				return nil
+			case err != nil:
+				// The store failed, so nothing was learned about the broker and
+				// the breaker is left alone.
+				p.log.Error("iteration failed", slog.Any("error", err))
+			default:
+				p.observe(ctx, res)
+
+				if !p.breaker.open() && res.Claimed >= p.cfg.BatchSize {
+					// A full batch means more is waiting. Do not sleep on a
+					// backlog.
+					continue
+				}
+			}
 		}
 
 		select {
@@ -131,9 +164,37 @@ func (p *Pipeline) Run(ctx context.Context) error {
 	}
 }
 
-// RunOnce performs one claim-publish-write-back cycle and reports how many
-// messages it claimed.
-func (p *Pipeline) RunOnce(ctx context.Context) (int, error) {
+// observe folds a cycle into the breaker and announces a change of state.
+//
+// The announcement matters more than it looks. While claims are held back
+// nothing is published, so nothing is deferred either, and the counter that
+// reports an outage stops advancing precisely when the outage is at its most
+// established. The gauge this drives is what stays true in the meantime.
+func (p *Pipeline) observe(ctx context.Context, res Result) {
+	if !p.breaker.observe(time.Now(), res) {
+		return
+	}
+
+	if p.breaker.open() {
+		p.log.Warn("holding claims back: the broker is unreachable",
+			slog.Duration("retry_in", p.breaker.wait()))
+	} else {
+		p.log.Info("resuming claims: the broker is reachable again")
+	}
+
+	p.emitter.Breaker(ctx, events.Breaker{
+		Stream: p.stream,
+		Driver: p.driver,
+		Paused: p.breaker.open(),
+	})
+}
+
+// RunOnce performs one claim-publish-write-back cycle and reports what it did.
+//
+// It always tries: holding claims back is the run loop's decision, not this
+// one's, which is what lets a caller — a test, or a trial after a pause — ask
+// the broker directly.
+func (p *Pipeline) RunOnce(ctx context.Context) (Result, error) {
 	started := time.Now()
 
 	lease := core.Lease{
@@ -144,10 +205,10 @@ func (p *Pipeline) RunOnce(ctx context.Context) (int, error) {
 
 	messages, err := p.store.Claim(ctx, p.stream, p.cfg.BatchSize, lease)
 	if err != nil {
-		return 0, err
+		return Result{}, err
 	}
 	if len(messages) == 0 {
-		return 0, nil
+		return Result{}, nil
 	}
 
 	ev := events.Iteration{
@@ -174,14 +235,19 @@ func (p *Pipeline) RunOnce(ctx context.Context) (int, error) {
 
 	acked, nacked := split(messages[:attempted], publishes, p.backoff)
 
+	res := Result{Claimed: len(messages)}
+
 	if err := p.writeBack(ctx, acked, nacked, lease.Token, &ev); err != nil {
-		return len(messages), err
+		return res, err
 	}
 
 	ev.Duration = time.Since(started)
 	p.emitter.Iteration(ctx, ev)
 
-	return len(messages), nil
+	res.Delivered = len(ev.Delivered)
+	res.Deferred = len(ev.Deferred)
+
+	return res, nil
 }
 
 // writeBack records the outcome of the batch.

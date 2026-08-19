@@ -39,8 +39,13 @@ func Subscribe(mod *appmod.BaseAppModule, hub *msghub.Hub, m *Metrics) error {
 		return err
 	}
 
-	return hubmod.SubscribeModule(mod, hub, events.TopicDeadLetter,
-		m.onDeadLetter, msghub.Synchronous())
+	if err := hubmod.SubscribeModule(mod, hub, events.TopicDeadLetter,
+		m.onDeadLetter, msghub.Synchronous()); err != nil {
+		return err
+	}
+
+	return hubmod.SubscribeModule(mod, hub, events.TopicBreaker,
+		m.onBreaker, msghub.Synchronous())
 }
 
 func (m *Metrics) onIteration(_ context.Context, ev events.Iteration) error {
@@ -126,6 +131,16 @@ func (m *Metrics) onStats(_ context.Context, ev events.Stats) error {
 
 func (m *Metrics) onRetention(_ context.Context, ev events.Retention) error {
 	m.RetentionDeleted.Add(float64(ev.Deleted))
+
+	return nil
+}
+
+func (m *Metrics) onBreaker(_ context.Context, ev events.Breaker) error {
+	paused := 0.0
+	if ev.Paused {
+		paused = 1
+	}
+	m.StreamPaused.WithLabelValues(m.Stream(ev.Stream)).Set(paused)
 
 	return nil
 }

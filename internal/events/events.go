@@ -21,7 +21,21 @@ var (
 	TopicStats      = msghub.NewTopic[Stats]("outbox.stats")
 	TopicRetention  = msghub.NewTopic[Retention]("outbox.retention")
 	TopicDeadLetter = msghub.NewTopic[DeadLetter]("outbox.dead_letter")
+	TopicBreaker    = msghub.NewTopic[Breaker]("outbox.breaker")
 )
+
+// Breaker reports that a stream has stopped, or resumed, claiming work.
+//
+// It is emitted only on a change, and it is the signal that stays true during
+// an outage: once claims are held back nothing is published, so nothing is
+// deferred either, and the counter that reports an unreachable broker goes
+// quiet exactly when the outage is most established.
+type Breaker struct {
+	Stream string
+	Driver string
+	// Paused reports whether claims are being held back.
+	Paused bool
+}
 
 // Publish is the outcome of publishing one message, as seen by the pipeline.
 type Publish struct {

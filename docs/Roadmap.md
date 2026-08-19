@@ -25,8 +25,18 @@ and waits out the outage; `OUTBOX_DISPATCH_MAX_DEFER` bounds the wait for stream
 that would rather fail than be late. The attempt counter measures rejections,
 not minutes.
 
+Claiming stops too while a broker is down, which is the second item off this
+page. The saving is not in the retries — a deferred message is already
+rescheduled a backoff into the future — but in the arrivals: every insert during
+an outage used to wake the pipeline and become a failed publish at once.
+
+The design landed differently from the sketch here. It reads the result of an
+ordinary claim rather than the connection supervisor's state, because publishing
+is the capability that matters and a health check is only a proxy for it — one
+that can be green while the exchange the messages need is not there.
+
 Details in [the changelog](../CHANGELOG.md) and
-[Operations](Operations.md#how-long-an-outage-the-defaults-survive).
+[Operations](Operations.md#claiming-stops-while-a-broker-is-down).
 
 ---
 
@@ -34,14 +44,6 @@ Details in [the changelog](../CHANGELOG.md) and
 
 The theme is: an unavailable dependency should cost you latency, never data or
 an operator's evening.
-
-**Stop claiming for a stream whose broker is known to be down.** Today the
-pipeline keeps claiming a batch, failing to publish and writing the failure back
-for the whole duration of an outage. That is three round-trips per batch to
-PostgreSQL to learn something the connection supervisor already knows. A
-breaker, driven by the supervisor's state rather than by a failure count, pauses
-the claim loop and resumes on reconnect. Not a correctness fix — it keeps the
-database quiet while the broker is not.
 
 **CLI parity with the admin API.** `outbox failed`, `outbox requeue`,
 `outbox stats` as subcommands, reading the same DSN as the daemon. Requeuing

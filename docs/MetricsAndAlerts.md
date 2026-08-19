@@ -33,6 +33,7 @@ whatever it likes into the `stream` column.
 | `outbox_oldest_pending_age_seconds` | gauge | — | How long the oldest undelivered message has waited. The clearest signal that delivery is falling behind: a count says how much is waiting, this says how long. |
 | `outbox_messages_by_status` | gauge | status | Rows in each non-terminal status. Delivered rows are deliberately absent — counting them means scanning them, and `outbox_messages_dispatched_total` already covers it. |
 | `outbox_messages_deferred` | gauge | — | Rows waiting on a broker that could not be reached, right now. A subset of pending and processing, not a status of its own. It is what separates a backlog that is moving slowly from one that is not moving at all. |
+| `outbox_stream_paused` | gauge | stream | `1` while the dispatcher has stopped claiming for a stream because its broker is unreachable. Claims resume on their own once one gets through. This is the signal that outlives the condition it reports: while it is `1`, nothing is published, so `outbox_messages_deferred_total` stops advancing. |
 | `outbox_batch_size` | histogram | stream | Messages per claim. Consistently at the configured maximum means the dispatcher is behind. |
 | `outbox_iteration_duration_seconds` | histogram | stream | One claim-publish-write-back cycle. |
 
@@ -114,7 +115,15 @@ groups:
           summary: Sustained publish failures against a broker.
 
       - alert: OutboxBrokerUnreachable
-        expr: sum by (stream) (rate(outbox_messages_deferred_total[5m])) > 0
+        # Two expressions, because the first one goes quiet on purpose. Once the
+        # dispatcher stops claiming for an unreachable broker it publishes
+        # nothing, so it defers nothing either, and the rate falls to zero
+        # exactly when the outage is most established. outbox_stream_paused is
+        # what stays true; the rate covers the interval before claims stop and
+        # streams too quiet for the pause to hold.
+        expr: >
+          max by (stream) (outbox_stream_paused) == 1
+          or sum by (stream) (rate(outbox_messages_deferred_total[5m])) > 0
         for: 10m
         labels: {severity: critical}
         annotations:

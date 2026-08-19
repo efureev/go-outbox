@@ -148,6 +148,9 @@ func (r *iterationRecorder) Iteration(_ context.Context, ev events.Iteration) {
 	r.seen = append(r.seen, ev)
 }
 
+// Breaker is not observed here; the interface asks for it.
+func (*iterationRecorder) Breaker(context.Context, events.Breaker) {}
+
 func (r *iterationRecorder) count() int {
 	r.mu.Lock()
 	defer r.mu.Unlock()

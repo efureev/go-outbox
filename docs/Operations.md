@@ -169,7 +169,7 @@ severs the connection through a proxy rather than describing what ought to happe
 
 | Failure | Behaviour |
 |---|---|
-| A broker goes down while running | Contained. Only the streams pointed at it stall; the rest keep publishing. Their messages retry with backoff and nothing is lost. |
+| A broker goes down while running | Contained. Only the streams pointed at it stall; the rest keep publishing. Their messages retry with backoff and nothing is lost. The affected stream also stops claiming, so an outage does not turn every incoming message into a failed publish. |
 | That broker comes back | Reconnects on its own, with no restart and no intervention. The supervisor redials with an exponential delay up to 30s. |
 | PostgreSQL goes down | Delivery stalls; the process stays up and does not spin. Claims fail once per poll interval and are logged. `/ready` reports unhealthy, so an orchestrator stops routing to it. |
 | PostgreSQL comes back | The pool reconnects, the notification listener re-listens, delivery resumes. |
@@ -177,6 +177,27 @@ severs the connection through a proxy rather than describing what ought to happe
 | An outage longer than the retry budget | Nothing. The budget counts rejections, and a broker that cannot be reached has not rejected anything: the messages wait, marked deferred, and go out when it returns. Set `OUTBOX_DISPATCH_MAX_DEFER` if you would rather they failed. |
 | A broker that answers and refuses | Retried with backoff until `MAX_ATTEMPTS` is spent, then `failed`, with the broker's own words in `last_error`. They stay in the table and wait for a requeue. |
 | A broker unreachable **at startup** | The process refuses to start. This is the asymmetry to know about: a broker that dies while running is contained, but one that is already dead when the dispatcher boots stops every stream, not just its own. |
+
+### Claiming stops while a broker is down
+
+Finding a broker gone stops the pipeline claiming for that stream. The pause
+starts at one poll interval and doubles up to `OUTBOX_DISPATCH_PAUSE_MAX`
+(`30s`), and one ordinary claim is let through each time it elapses — publishing
+is the capability that matters, so the trial is a real batch rather than a
+health check, which can be green while the exchange the messages need is not
+there.
+
+What this saves is not the retries. A deferred message is already rescheduled a
+backoff into the future, so retrying an outage is self-limiting. New messages
+are not: every insert that arrives while the broker is down wakes the pipeline
+through `LISTEN`/`NOTIFY` and would otherwise be claimed, attempted and written
+back at once. The load removed is proportional to how busy the producer is
+rather than to how long the outage lasts.
+
+The ceiling matches the delay the RabbitMQ supervisor backs off to between
+reconnection attempts, so pausing adds nothing to how soon a returning broker is
+noticed — the driver's own backoff already bounds that. `0` disables the pause
+entirely.
 
 ### How long an outage the defaults survive
 
@@ -206,12 +227,20 @@ with a broker that is actively saying no.
 #### What to watch while a broker is down
 
 ```promql
+outbox_stream_paused                     # 1: this stream has stopped claiming
 outbox_messages_deferred                 # how many are waiting on a broker right now
-rate(outbox_messages_deferred_total[5m]) # rising: the outage is ongoing
 outbox_oldest_pending_age_seconds        # how long the oldest has waited
+rate(outbox_messages_deferred_total[5m]) # rising: messages are still being attempted
 ```
 
-The last is the one to alert on. A backlog that is growing while
+The fourth is a trap on its own, and worth understanding before writing an alert
+on it. Once `outbox_stream_paused` goes to `1` the dispatcher stops claiming for
+that stream, so it publishes nothing, so it defers nothing — and the deferral
+rate falls to zero exactly when the outage is most established. The gauge is
+what stays true; the rate covers the interval before claims stop. The shipped
+`OutboxBrokerUnreachable` rule joins the two for that reason.
+
+The backlog age is the one to alert on. A backlog that is growing while
 `outbox_messages_deferred` sits at zero means the dispatcher is behind and will
 catch up; the same backlog with a deferred count equal to it means nothing will
 move until somebody fixes the broker.
