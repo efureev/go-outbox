@@ -12,6 +12,7 @@ import (
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 	"go.opentelemetry.io/otel/trace"
 
+	"github.com/efureev/go-outbox/internal/config"
 	"github.com/efureev/go-outbox/internal/core"
 )
 
@@ -234,5 +235,60 @@ func BenchmarkPublishRecording(b *testing.B) {
 		msgs := []core.Message{message("a", nil)}
 		tr.Publish(context.Background(), here, msgs).End(errs)
 		exp.Reset()
+	}
+}
+
+// New is the constructor the application actually calls; everything else in
+// this file goes through NewWithProvider, which is the seam the tests use. The
+// exporter connects lazily, so the whole of it is reachable without a collector.
+func TestNewWithoutAnEndpointCostsNothing(t *testing.T) {
+	tracer, shutdown, err := New(t.Context(), config.OTelConfig{}, Service{Name: "outbox"})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	if tracer.Enabled() {
+		t.Error("no endpoint was configured and tracing is on")
+	}
+	if err := shutdown(t.Context()); err != nil {
+		t.Errorf("shutting down a disabled tracer: %v", err)
+	}
+
+	// A disabled tracer still has to be safe to call.
+	tracer.Publish(context.Background(), here, []core.Message{message("a", nil)}).End([]error{nil})
+}
+
+func TestNewBuildsAnExporterWithoutReachingIt(t *testing.T) {
+	cases := []struct {
+		name string
+		cfg  config.OTelConfig
+	}{
+		{"insecure", config.OTelConfig{Endpoint: "127.0.0.1:4318", Insecure: true, Sampling: 1}},
+		{"tls", config.OTelConfig{Endpoint: "127.0.0.1:4318", Sampling: 0.1}},
+		{"never sampled", config.OTelConfig{Endpoint: "127.0.0.1:4318", Insecure: true, Sampling: 0}},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			svc := Service{Name: "outbox", Version: "1.6.0", Instance: "pod-1"}
+
+			tracer, shutdown, err := New(t.Context(), c.cfg, svc)
+			if err != nil {
+				t.Fatalf("New: %v", err)
+			}
+			if !tracer.Enabled() {
+				t.Error("an endpoint was configured and tracing is off")
+			}
+
+			// Nothing here reaches the collector: the span is batched and the
+			// shutdown flushes into a connection that is never made. What is
+			// under test is that assembling the provider does not fail and that
+			// the tracer it produces is usable.
+			tracer.Publish(context.Background(), here,
+				[]core.Message{message("a", nil)}).End([]error{nil})
+
+			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+			defer cancel()
+			_ = shutdown(ctx)
+		})
 	}
 }
