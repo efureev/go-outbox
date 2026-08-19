@@ -127,3 +127,40 @@ func TestBreakerCeilingOfZeroDisablesIt(t *testing.T) {
 		t.Error("a disabled breaker held claims back")
 	}
 }
+
+// The first pause is defaulted rather than trusted. Zero would make the breaker
+// open and immediately expire — it would report claims held back while holding
+// nothing back, which is worse than not having one: the metric says the stream
+// stopped and it did not.
+func TestTheFirstPauseIsDefaultedButNotOverridden(t *testing.T) {
+	cases := []struct {
+		name  string
+		first time.Duration
+		want  time.Duration
+	}{
+		{"zero is defaulted", 0, time.Second},
+		{"negative is defaulted", -time.Minute, time.Second},
+		{"a configured value is kept", 250 * time.Millisecond, 250 * time.Millisecond},
+		{"even one shorter than the default", time.Millisecond, time.Millisecond},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			b := newBreaker(c.first, time.Hour)
+
+			now := time.Now()
+			if !b.observe(now, Result{Claimed: 1, Deferred: 1}) {
+				t.Fatal("an unreachable broker did not open the breaker")
+			}
+
+			if got := b.wait(); got != c.want {
+				t.Errorf("the first pause is %s, want %s", got, c.want)
+			}
+			// A pause that does not actually hold anything back is the failure
+			// this defaulting exists to prevent.
+			if !b.blocks(now) {
+				t.Error("the breaker is open but blocks nothing")
+			}
+		})
+	}
+}

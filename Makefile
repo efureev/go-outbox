@@ -29,6 +29,7 @@ BENCHLOGGING  ?= 200000x
 BENCHENQUEUE  ?= 200x
 BENCHSTORE    ?= 20000x
 BENCHCOUNT    ?= 3
+GREMLINS      ?= v0.6.0
 # How long `make soak` breaks things for. It is not a CI job: the point is to
 # run the real timings for longer than a test suite ever would.
 SOAK          ?= 1h
@@ -44,7 +45,7 @@ LDFLAGS := -s -w \
 	-X 'main.date=$(BUILD_DATE)'
 
 .DEFAULT_GOAL := help
-.PHONY: help build run test test-integration test-all bench bench-logging bench-throughput bench-latency bench-destination bench-enqueue bench-store dist cover lint lint-host fmt fmt-host tidy up down logs psql image clean clean-cache
+.PHONY: help build run test test-integration test-all bench bench-logging bench-throughput bench-latency bench-destination bench-enqueue bench-store dist cover mutation lint lint-host fmt fmt-host tidy up down logs psql image clean clean-cache
 
 help: ## List the available targets
 	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z_-]+:.*?## / {printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -92,6 +93,19 @@ bench-enqueue: ## Benchmark the producer's cost: outboxclient against outboxsql
 bench-store: ## Benchmark claim and write-back alone, with no destination at all
 	go test -tags integration -run '^$$' -bench 'BenchmarkStore' \
 		-benchtime $(BENCHSTORE) -count $(BENCHCOUNT) -timeout 60m ./test/integration/...
+
+mutation: ## Run mutation testing on the three packages where it pays (needs no infrastructure)
+	@command -v gremlins >/dev/null 2>&1 || { \
+		printf 'installing gremlins %s\n' "$(GREMLINS)"; \
+		go install github.com/go-gremlins/gremlins/cmd/gremlins@$(GREMLINS); }
+	@# The default timeout is derived from a baseline run and is far too tight
+	@# for packages whose tests are milliseconds: every mutant reports as timed
+	@# out rather than killed, which reads as a passing suite.
+	gremlins unleash --timeout-coefficient 60 --workers 2 ./internal/config/
+	gremlins unleash --timeout-coefficient 60 --workers 2 ./internal/core/
+	gremlins unleash --timeout-coefficient 60 --workers 2 \
+		-E 'deadletter\.go' -E 'janitor\.go' -E 'listener\.go' -E 'pipeline\.go' \
+		-E 'publish\.go' -E 'chunk\.go' -E 'pause\.go' ./internal/dispatch/
 
 cover: ## Run every test with coverage
 	go test -race -tags integration -timeout 10m -covermode=atomic \

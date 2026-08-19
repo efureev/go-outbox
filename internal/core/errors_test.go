@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strings"
 	"testing"
 )
 
@@ -99,5 +100,86 @@ func TestPermanenceOutranksUnavailability(t *testing.T) {
 	}
 	if !IsUnavailable(err) {
 		t.Fatal("this test would be meaningless if the inner classification were not also present")
+	}
+}
+
+// Valid is what stands between the database's CHECK constraint and a status
+// read back from a row. Both ends of the range matter: the set is closed, and a
+// predicate that is wrong by one at either end lets through a value the schema
+// would reject.
+func TestStatusValidAcceptsExactlyTheFourStatuses(t *testing.T) {
+	valid := []Status{
+		StatusPending, StatusProcessing, StatusSent, StatusFailed,
+	}
+	for _, s := range valid {
+		if !s.Valid() {
+			t.Errorf("%s (%d) is not valid, and it is one of the four", s, s)
+		}
+	}
+
+	// Immediately outside at each end, plus the far cases.
+	for _, s := range []Status{-1, 4, -128, 127} {
+		if s.Valid() {
+			t.Errorf("status %d is accepted as valid", s)
+		}
+	}
+}
+
+// The two error messages are what an operator reads in `outbox failed` and in
+// the log, so both forms of each have to say which class the failure is in.
+// A wrapped cause is the common case; a bare reason happens when the classifier
+// itself is the only thing that knows.
+func TestErrorMessagesNameTheirClass(t *testing.T) {
+	cause := errors.New("connection reset")
+
+	cases := []struct {
+		name string
+		err  error
+		want []string
+		not  string
+	}{
+		{
+			name: "permanent, with a cause",
+			err:  Permanent("unroutable", cause),
+			want: []string{"permanent", "unroutable", "connection reset"},
+			not:  "unavailable",
+		},
+		{
+			name: "permanent, on its own",
+			err:  Permanent("unknown stream", nil),
+			want: []string{"permanent", "unknown stream"},
+			not:  "%!v(MISSING)",
+		},
+		{
+			name: "unavailable, with a cause",
+			err:  Unavailable("dial failed", cause),
+			want: []string{"unavailable", "dial failed", "connection reset"},
+			not:  "permanent",
+		},
+		{
+			name: "unavailable, on its own",
+			err:  Unavailable("broker down", nil),
+			want: []string{"unavailable", "broker down"},
+			not:  "permanent",
+		},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			msg := c.err.Error()
+
+			for _, want := range c.want {
+				if !strings.Contains(msg, want) {
+					t.Errorf("%q does not contain %q", msg, want)
+				}
+			}
+			if strings.Contains(msg, c.not) {
+				t.Errorf("%q contains %q, which belongs to the other form", msg, c.not)
+			}
+			// A nil cause must not leave the verb dangling in the output.
+			if strings.Contains(msg, "<nil>") {
+				t.Errorf("%q renders a nil cause", msg)
+			}
+		})
 	}
 }
