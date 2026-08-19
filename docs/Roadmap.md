@@ -2,7 +2,7 @@
 
 [Русская версия](Roadmap.ru.md)
 
-1.4.0 is released. What follows is what I would build next, in the order I would
+1.5.0 is released. What follows is what I would build next, in the order I would
 build it — with the reasoning for the *order*, not just the ordering. Each item
 states what it changes, why it earns its place, and what it costs.
 
@@ -19,9 +19,9 @@ would land rather than when.
 | CLI parity with the admin API | **Shipped in 1.4.0** |
 | A Grafana dashboard as JSON | **Shipped in 1.4.0** |
 | Supply-chain hygiene in CI | **Shipped in 1.4.0** |
-| OpenTelemetry spans | **Done**, not yet released |
-| Table partitioning, and a soak target | **Done**, not yet released |
-| NATS JetStream, Redis Streams, a `database/sql` client | Planned — 1.7 |
+| OpenTelemetry spans | **Shipped in 1.5.0** |
+| Table partitioning, and a soak target | **Shipped in 1.5.0** |
+| NATS JetStream, Redis Streams, a `database/sql` client | Planned — 1.6 |
 | Per-key ordering | Planned — 2.0 |
 
 What is deliberately **not** on the list, and the reasoning for each refusal, is
@@ -73,65 +73,28 @@ anything the dispatcher does differently.
   release, and keyless cosign signatures on the checksums and on the image by
   digest.
 
+**Visible inside a trace** — 1.5.0. An `outbox.publish` span per message,
+parented to the producer's `traceparent` and re-injected into the message's
+headers, so a trace reads producer → dispatcher → consumer with the wait visible
+as the space in front of the middle span. Costlier than this page guessed: four
+direct dependencies, sixteen indirect, and 6.3 MB on a 15.5 MB binary. Free when
+no collector is configured, which is the default.
+
+**Range partitioning** — 1.5.0. Opt-in, for deployments past roughly ten million
+rows a day, where a chunked `DELETE` creates dead tuples faster than autovacuum
+reclaims them. Apply
+[`migrations/partitioned/messages.sql`](../migrations/partitioned/messages.sql)
+first and the released migrations run over it unchanged. It does change one
+thing this page said it would not: the primary key becomes `(id, created_at)`,
+because PostgreSQL requires a unique constraint on a partitioned table to
+include the partition key. `make soak` shipped alongside it.
+
 Details in [the changelog](../CHANGELOG.md) and
 [Operations](Operations.md#claiming-stops-while-a-broker-is-down).
 
 ---
 
-## 1.5 — closing the hole in the trace
-
-The producer's span ends at commit. The consumer's span starts at receive.
-Between them is a gap exactly the width of the outbox lag — the one interval
-nobody can currently see, and the first thing anyone asks about when a message
-arrives late.
-
-The dispatcher already carries `traceparent` through headers and emits no span
-of its own. Adding `outbox.publish`, linked to the producer's context, closes
-the hole and makes lag attributable to a stage: waiting to be claimed, waiting
-for the broker, or waiting on a retry.
-
-**Done, not yet released**, and the cost was worse than this page guessed. It
-estimated "roughly four modules"; the measured price is four direct
-dependencies, sixteen indirect, and **6.3 MB on a 15.5 MB binary** — 41% more
-image, paid whether or not a collector is ever configured. The throughput
-estimate held: with no endpoint set the publish loop starts no span, at zero
-allocations.
-
-Worth it, on the same reasoning as before — tracing is the most-requested thing
-from operators — but worth recording that the number was wrong, because the next
-estimate on this page is written by the same hand.
-
----
-
-## 1.6 — volume
-
-**Done, not yet released**, and one claim on this page was wrong.
-
-Partitioning ships as an opt-in schema rather than an alternative migration set:
-apply [`migrations/partitioned/messages.sql`](../migrations/partitioned/messages.sql)
-first and the released migrations run over it unchanged. The dispatcher notices
-the shape of the table and drops partitions instead of deleting rows.
-
-This page called it "the largest item here that changes no semantics". It does
-change one. PostgreSQL requires a unique constraint on a partitioned table to
-include the partition key, so `id` alone cannot be the primary key and becomes
-`(id, created_at)` — the database stops enforcing that an id appears once across
-the whole table. Nothing breaks, because consumers deduplicate on the message id
-under at-least-once delivery, but it is a guarantee given up.
-
-The claim query held up: about 0.25 ms across 31 daily partitions against
-0.18 ms unpartitioned, because the partial indexes on older partitions are empty
-and merging across them costs almost nothing.
-
-`make soak` runs the resilience scenarios under load for as long as it is told
-to, behind its own build tag.
-
-Details in [the changelog](../CHANGELOG.md) and
-[Operations](Operations.md#partitioning-past-roughly-ten-million-rows-a-day).
-
----
-
-## 1.7 — more destinations
+## 1.6 — more destinations
 
 `broker.Publisher` exists precisely so that this is cheap, and a driver is the
 clearest way to prove the interface was worth having.

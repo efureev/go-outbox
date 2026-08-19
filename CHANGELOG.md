@@ -6,6 +6,11 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.5.0] — 2026-08-19
+
+Two things a deployment reaches for once it is large enough to need them: a trace that shows where
+the time went, and a table shape that keeps up past ten million rows a day.
+
 ### Added
 
 - **Range partitioning, for deployments past roughly ten million rows a day.** At that volume the
