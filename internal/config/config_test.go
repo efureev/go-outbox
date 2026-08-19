@@ -407,3 +407,140 @@ func TestLoadAdminStillValidatesTheDatabase(t *testing.T) {
 		t.Errorf("the error does not name the offending variable: %v", err)
 	}
 }
+
+func postgresEnv(extra ...string) []string {
+	return append([]string{
+		"OUTBOX_DB_USER=outbox",
+		"OUTBOX_DB_NAME=app",
+		"OUTBOX_DB_SCHEMA=outbox",
+		"OUTBOX_DB_TABLE=messages",
+		"OUTBOX_STREAMS=billing",
+		"OUTBOX_STREAM_BILLING_DRIVER=inb",
+		"OUTBOX_DRIVER_INB_TYPE=postgres",
+		"OUTBOX_DRIVER_INB_SCHEMA=billing",
+		"OUTBOX_DRIVER_INB_TABLE=inbox",
+	}, extra...)
+}
+
+func postgresDriver(t *testing.T, extra ...string) *PostgresDriver {
+	t.Helper()
+
+	cfg, err := LoadFrom(env(t, postgresEnv(extra...)...))
+	if err != nil {
+		t.Fatalf("LoadFrom: %v", err)
+	}
+
+	d, ok := cfg.Brokers.Drivers["inb"].(*PostgresDriver)
+	if !ok {
+		t.Fatalf("driver is %T, want *PostgresDriver", cfg.Brokers.Drivers["inb"])
+	}
+
+	return d
+}
+
+// An empty DSN means the database the dispatcher already reads from. That is
+// the modular-monolith case, and having to repeat a connection string that is
+// already configured is how the two drift apart.
+func TestPostgresDriverDefaultsToTheDispatchersDatabase(t *testing.T) {
+	cfg, err := LoadFrom(env(t, postgresEnv()...))
+	if err != nil {
+		t.Fatalf("LoadFrom: %v", err)
+	}
+
+	d, ok := cfg.Brokers.Drivers["inb"].(*PostgresDriver)
+	if !ok {
+		t.Fatalf("driver is %T, want *PostgresDriver", cfg.Brokers.Drivers["inb"])
+	}
+
+	if !d.SameDatabase {
+		t.Error("an empty DSN did not resolve to the dispatcher's own database")
+	}
+	// Compared against the very configuration it was defaulted from, so the
+	// two cannot agree by coincidence.
+	if want := cfg.DB.ConnString(); d.DSN != want {
+		t.Errorf("DSN = %q, want the dispatcher's %q", d.DSN, want)
+	}
+}
+
+func TestPostgresDriverTakesAnExplicitDSN(t *testing.T) {
+	d := postgresDriver(t, "OUTBOX_DRIVER_INB_DSN=postgres://u:p@other:5432/billing")
+
+	if d.SameDatabase {
+		t.Error("an explicit DSN was reported as the dispatcher's own database")
+	}
+	if d.DSN != "postgres://u:p@other:5432/billing" {
+		t.Errorf("DSN = %q", d.DSN)
+	}
+}
+
+// Delivering into the outbox table itself would be a loop: every message
+// published becomes a new message to publish.
+func TestPostgresDriverRefusesToDeliverToItsOwnOutbox(t *testing.T) {
+	_, err := LoadFrom(env(t, postgresEnv(
+		"OUTBOX_DRIVER_INB_SCHEMA=outbox", "OUTBOX_DRIVER_INB_TABLE=messages")...))
+	if err == nil {
+		t.Fatal("a driver pointed at the dispatcher's own outbox table was accepted")
+	}
+	if !strings.Contains(err.Error(), "deliver to itself") {
+		t.Errorf("the error does not name the problem: %v", err)
+	}
+}
+
+// The identifiers are interpolated into SQL rather than passed as parameters,
+// so they are checked on the way in — the same rule the dispatcher applies to
+// its own schema and table.
+func TestPostgresDriverRejectsIdentifiersItCannotQuote(t *testing.T) {
+	for name, extra := range map[string][]string{
+		"schema": {`OUTBOX_DRIVER_INB_SCHEMA=billing"; DROP TABLE x --`},
+		"table":  {`OUTBOX_DRIVER_INB_TABLE=inbox"; DROP TABLE x --`},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := LoadFrom(env(t, postgresEnv(extra...)...)); err == nil {
+				t.Error("an unusable identifier was accepted")
+			}
+		})
+	}
+}
+
+func TestPostgresDriverRequiresADestination(t *testing.T) {
+	for name, drop := range map[string]string{
+		"no schema": "OUTBOX_DRIVER_INB_SCHEMA",
+		"no table":  "OUTBOX_DRIVER_INB_TABLE",
+	} {
+		t.Run(name, func(t *testing.T) {
+			var kept []string
+			for _, pair := range postgresEnv() {
+				if !strings.HasPrefix(pair, drop+"=") {
+					kept = append(kept, pair)
+				}
+			}
+
+			if _, err := LoadFrom(env(t, kept...)); err == nil {
+				t.Error("a driver with no destination was accepted")
+			}
+		})
+	}
+}
+
+// Endpoint is served over HTTP, so it must not carry the password — and it must
+// name the table, or two drivers into one database are indistinguishable.
+func TestPostgresDriverEndpointRedactsAndNamesTheTable(t *testing.T) {
+	d := postgresDriver(t, "OUTBOX_DRIVER_INB_DSN=postgres://user:hunter2@db:5432/billing")
+
+	got := d.Endpoint()
+	if strings.Contains(got, "hunter2") {
+		t.Errorf("Endpoint leaks the password: %s", got)
+	}
+	if !strings.Contains(got, "billing.inbox") {
+		t.Errorf("Endpoint does not name the table: %s", got)
+	}
+}
+
+// A typo in a driver key is a startup error rather than a setting that silently
+// does nothing, and the postgres driver has to join that scheme.
+func TestPostgresDriverRejectsUnknownKeys(t *testing.T) {
+	_, err := LoadFrom(env(t, postgresEnv("OUTBOX_DRIVER_INB_CHANNELS=4")...))
+	if err == nil {
+		t.Fatal("a key belonging to another driver type was accepted")
+	}
+}

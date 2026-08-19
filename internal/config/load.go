@@ -68,7 +68,7 @@ func decode(env *envi.Env, adminOnly bool) (Config, error) {
 	// A broken routing table does not short-circuit the rest: an operator
 	// bringing up a fresh deployment should see every mistake in one run, not
 	// discover the next one on each restart.
-	brokers, brokerErr := loadBrokers(env)
+	brokers, brokerErr := loadBrokers(env, cfg.DB)
 	cfg.Brokers = brokers
 
 	if cfg.App.Instance == "" {

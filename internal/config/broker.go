@@ -17,6 +17,9 @@ type DriverType string
 const (
 	DriverRabbitMQ DriverType = "rabbitmq"
 	DriverKafka    DriverType = "kafka"
+	// DriverPostgres delivers into a table rather than to a broker: the
+	// consumer's inbox. See docs/InboxSpec.ru.md.
+	DriverPostgres DriverType = "postgres"
 )
 
 // Source is the value lookup the broker configuration reads from: the merged
@@ -176,6 +179,10 @@ var (
 		"DSN", "CHANNELS", "DECLARE", "MANDATORY", "PUBLISH_TIMEOUT", "RECONNECT_DELAY",
 	}
 
+	postgresDriverKeys = []string{
+		"DSN", "SCHEMA", "TABLE", "WRITE_TIMEOUT", "MAX_CONNS",
+	}
+
 	kafkaDriverKeys = []string{
 		"BROKERS", "SECURITY_PROTOCOL", "SASL_MECHANISM", "SASL_USERNAME", "SASL_PASSWORD",
 		"SSL_CA_PEM_B64", "SSL_CERT_PEM_B64", "SSL_KEY_PEM_B64",
@@ -191,10 +198,20 @@ const (
 	defaultRabbitVersionSep = "_"
 	defaultKafkaPrefixSep   = "."
 	defaultKafkaVersionSep  = "."
+	// A table is not a topic, but the topic column still carries the effective
+	// name, and a consumer filtering on it deserves the same shape it would
+	// have subscribed to. The dotted form reads better in a column than the
+	// underscored one.
+	defaultPostgresPrefixSep  = "."
+	defaultPostgresVersionSep = "."
 )
 
 // loadBrokers assembles the routing table from src.
-func loadBrokers(src Source) (BrokerConfig, error) {
+// db is threaded through so that a postgres driver can default to the
+// database the dispatcher already reads from: "the same one" is the whole
+// point of the inbox living beside the outbox, and it should not have to be
+// spelled out twice.
+func loadBrokers(src Source, db DBConfig) (BrokerConfig, error) {
 	var empty BrokerConfig
 
 	raw, _ := src.Lookup(keyStreams)
@@ -237,7 +254,7 @@ func loadBrokers(src Source) (BrokerConfig, error) {
 	var errs []error
 
 	for _, name := range driverNames {
-		d, err := loadDriver(src, name, driverNames)
+		d, err := loadDriver(src, name, driverNames, db)
 		if err != nil {
 			errs = append(errs, fmt.Errorf("driver %q: %w", name, err))
 
@@ -274,7 +291,7 @@ func rejectCollidingNames(names []string) error {
 	return nil
 }
 
-func loadDriver(src Source, name string, allNames []string) (DriverConfig, error) {
+func loadDriver(src Source, name string, allNames []string, db DBConfig) (DriverConfig, error) {
 	ns := fmt.Sprintf(driverPrefixFmt, envToken(name))
 
 	get := func(key string) string {
@@ -297,6 +314,8 @@ func loadDriver(src Source, name string, allNames []string) (DriverConfig, error
 		known = append(slices.Clone(commonDriverKeys), rabbitDriverKeys...)
 	case DriverKafka:
 		known = append(slices.Clone(commonDriverKeys), kafkaDriverKeys...)
+	case DriverPostgres:
+		known = append(slices.Clone(commonDriverKeys), postgresDriverKeys...)
 	}
 
 	if err := rejectUnknownKeys(src, ns, name, allNames, known); err != nil {
@@ -317,6 +336,12 @@ func loadDriver(src Source, name string, allNames []string) (DriverConfig, error
 		naming.VersionSep = orDefault(get("VERSION_SEP"), defaultKafkaVersionSep)
 
 		return buildKafkaDriver(name, naming, get)
+
+	case DriverPostgres:
+		naming.PrefixSep = orDefault(get("PREFIX_SEP"), defaultPostgresPrefixSep)
+		naming.VersionSep = orDefault(get("VERSION_SEP"), defaultPostgresVersionSep)
+
+		return buildPostgresDriver(name, naming, get, db)
 	}
 
 	return nil, fmt.Errorf("unsupported driver type %q", dType)
@@ -384,8 +409,10 @@ func parseDriverType(s string) (DriverType, error) {
 		return DriverRabbitMQ, nil
 	case "kafka":
 		return DriverKafka, nil
+	case "postgres", "postgresql", "pg", "inbox":
+		return DriverPostgres, nil
 	default:
-		return "", fmt.Errorf("unsupported driver type %q (want rabbitmq or kafka)", s)
+		return "", fmt.Errorf("unsupported driver type %q (want rabbitmq, kafka or postgres)", s)
 	}
 }
 

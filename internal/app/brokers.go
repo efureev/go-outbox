@@ -9,6 +9,7 @@ import (
 
 	"github.com/efureev/go-outbox/internal/broker"
 	"github.com/efureev/go-outbox/internal/broker/kafka"
+	"github.com/efureev/go-outbox/internal/broker/postgres"
 	"github.com/efureev/go-outbox/internal/broker/rabbitmq"
 	"github.com/efureev/go-outbox/internal/config"
 	"github.com/efureev/go-outbox/internal/logging"
@@ -74,6 +75,8 @@ func (m *brokersModule) build(ctx context.Context, name string, driver config.Dr
 		return rabbitmq.New(ctx, d, log)
 	case *config.KafkaDriver:
 		return kafka.New(ctx, d, log)
+	case *config.PostgresDriver:
+		return postgres.New(ctx, d, log)
 	default:
 		return nil, fmt.Errorf("driver %q has unsupported type %q", name, driver.Type())
 	}

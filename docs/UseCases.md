@@ -2,7 +2,7 @@
 
 English | [Русский](UseCases.ru.md)
 
-Six deployments, from a laptop to a cluster. Each is complete enough to copy, and
+Nine deployments, from a laptop to a cluster. Each is complete enough to copy, and
 each ends with the mistakes that environment invites — which is the part worth
 reading twice.
 
@@ -17,6 +17,9 @@ transaction as the business change**. Everything else is plumbing.
 | 4 | [Bare metal, systemd, several instances on one host](usecases/4-systemd-baremetal.md) | Several dispatchers on one machine |
 | 5 | [Four streams across three RabbitMQ instances](usecases/5-multi-rabbitmq.md) | One producer writing to several brokers |
 | 6 | [A Go producer on database/sql](usecases/6-database-sql.md) | A service on `sqlx`, `gorm` or the standard library |
+| 7 | [A modular monolith: an inbox instead of a broker](usecases/7-inbox-monolith.md) | Bounded contexts in one database, no broker at all |
+| 8 | [Two services, two databases, no broker](usecases/8-inbox-two-services.md) | Delivering into another service's inbox |
+| 9 | [Dead letters in a table, not a topic](usecases/9-dlq-table.md) | Working through what stopped, with SQL |
 
 They used to be one document. It grew past the point where anybody read it end
 to end, so each is now its own page and this is the index.

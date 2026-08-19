@@ -21,7 +21,7 @@ const migrationLockTimeout = 2 * time.Minute
 // dispatcher's queries and wrong for a CREATE INDEX on a large table; a
 // dedicated connection keeps the two settings from having to be one.
 func Migrate(ctx context.Context, cfg config.Config, log *slog.Logger) ([]migrate.Record, error) {
-	conn, err := pgx.Connect(ctx, dsn(cfg.DB))
+	conn, err := pgx.Connect(ctx, cfg.DB.ConnString())
 	if err != nil {
 		return nil, fmt.Errorf("connect for migrations: %w", err)
 	}
@@ -33,7 +33,7 @@ func Migrate(ctx context.Context, cfg config.Config, log *slog.Logger) ([]migrat
 // MigrationStatus reports what is recorded in the database and what this build
 // ships, so the two can be compared.
 func MigrationStatus(ctx context.Context, cfg config.Config) (applied, shipped []migrate.Record, err error) {
-	conn, err := pgx.Connect(ctx, dsn(cfg.DB))
+	conn, err := pgx.Connect(ctx, cfg.DB.ConnString())
 	if err != nil {
 		return nil, nil, fmt.Errorf("connect for migrations: %w", err)
 	}

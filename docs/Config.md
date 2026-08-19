@@ -130,6 +130,36 @@ Driver settings are looked up by exact key from a closed set. A misspelled key i
 silently does nothing — and a driver whose name is a prefix of another (`rmq` and `rmq_local`) reads only its own
 variables.
 
+### Delivering into a table instead of a broker
+
+A driver of type `postgres` writes into the consumer's inbox. Nothing else in
+the configuration changes: a stream still names a driver, and the producer still
+names a stream.
+
+```dotenv
+OUTBOX_STREAM_BILLING_DRIVER=inb
+
+OUTBOX_DRIVER_INB_TYPE=postgres
+OUTBOX_DRIVER_INB_DSN=              # empty: the dispatcher's own database
+OUTBOX_DRIVER_INB_SCHEMA=billing
+OUTBOX_DRIVER_INB_TABLE=inbox
+```
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `..._DSN` | the dispatcher's database | Where the inbox lives. Empty is the modular-monolith case: outbox and inbox side by side. |
+| `..._SCHEMA`, `..._TABLE` | — | Required. The table must exist — the dispatcher inserts and does nothing else, so it never creates it. |
+| `..._WRITE_TIMEOUT` | `15s` | Bounds one insert. |
+| `..._MAX_CONNS` | `4` | Pool size for this destination. Delivery is a statement or two per batch, not a workload of its own. |
+
+The table's shape and the reasoning behind it are in
+[migrations/inbox/messages.sql](../migrations/inbox/messages.sql); the flows and
+the use cases are in [InboxSpec](InboxSpec.ru.md).
+
+Two things the dispatcher refuses at startup: a table that does not exist, and a
+destination that is the dispatcher's own outbox table — which would deliver to
+itself, every message published becoming a new message to publish.
+
 ### Several brokers of the same kind
 
 Nothing ties a driver to a broker *type* — a driver is one connection, and there may be as many as there are brokers to

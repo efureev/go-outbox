@@ -10,6 +10,9 @@
 package config
 
 import (
+	"net"
+	"net/url"
+	"strconv"
 	"time"
 )
 
@@ -78,6 +81,33 @@ type DBConfig struct {
 	MaxConnIdleTime  time.Duration `env:"MAX_CONN_IDLE_TIME,default=30m"`
 	AutoMigrate      bool          `env:"AUTO_MIGRATE,default=false"`
 	MigrationLockKey int64         `env:"MIGRATION_LOCK_KEY,default=8090211501"`
+}
+
+// ConnString renders the connection string.
+//
+// It lives here rather than beside the pool because the pool is no longer the
+// only thing that needs it: a driver delivering into PostgreSQL has to be able
+// to say "the same database the dispatcher reads from" without repeating how
+// that database is described.
+func (c DBConfig) ConnString() string {
+	if c.DSN != "" {
+		return c.DSN
+	}
+
+	u := url.URL{
+		Scheme: "postgres",
+		User:   url.UserPassword(c.User, c.Password),
+		Host:   net.JoinHostPort(c.Host, strconv.Itoa(c.Port)),
+		Path:   "/" + c.Name,
+	}
+
+	q := url.Values{}
+	if c.SSLMode != "" {
+		q.Set("sslmode", c.SSLMode)
+	}
+	u.RawQuery = q.Encode()
+
+	return u.String()
 }
 
 type DispatchConfig struct {

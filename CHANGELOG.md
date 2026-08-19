@@ -8,6 +8,68 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **A `postgres` driver: delivery into a table instead of to a broker.** The destination is the
+  consumer's inbox, and the dispatcher only inserts into it — it does not create the table, read
+  it, update it or clean it up. That boundary is what keeps this a destination rather than the
+  beginnings of a consumer framework.
+
+  It buys a guarantee no broker offers. Delivery stays at-least-once, because the insert and the
+  write-back marking the row `sent` are two commits and a replica can die between them, but the
+  inbox's primary key makes the repeat harmless: the driver inserts with `ON CONFLICT (id) DO
+  NOTHING` and reports a conflict as a delivery. Deduplication stops being an obligation on the
+  consumer's code and becomes a property of its schema.
+
+  It also costs nothing to carry. pgx is already linked, so the driver adds **zero modules** —
+  the only candidate on the [driver spec](docs/DriverSpec.ru.md) of which that is true, against
+  +1.58 MB for NATS and +6.33 MB for Redis Streams. And it removes the broker from the list of
+  things a deployment must run at all.
+
+  An empty `DSN` means the database the dispatcher already reads its outbox from, which is the
+  modular-monolith case. Two configurations are refused at startup: a table that does not exist,
+  and a destination that is the dispatcher's own outbox table — which would deliver to itself,
+  every published message becoming a new message to publish.
+
+  A batch is one statement on the happy path. When the database refuses, the batch is replayed one
+  message at a time, because a positional error slice is the contract and one malformed message
+  must not condemn the rest; that second pass is skipped when the database could not be reached at
+  all. Classification reads the server's own SQLSTATE, which makes this the least guessy of the
+  three drivers.
+
+  Example schema and the reasoning behind it:
+  [migrations/inbox/messages.sql](migrations/inbox/messages.sql). Use cases and the flows:
+  [docs/InboxSpec.ru.md](docs/InboxSpec.ru.md); whether it was worth building at all:
+  [docs/PostgresDestination.ru.md](docs/PostgresDestination.ru.md).
+
+  Three properties are measured rather than asserted. A batch is one statement — proved by a
+  statement-level trigger on the inbox, which fires once per statement whatever the row count,
+  rather than by timing. On the failure path the errors land positionally, including on the first
+  and last message, where an off-by-one in the isolating pass would show. And there is no
+  payload-size class at all: 32 MiB in one message and 64 MiB in one batch go in and come back byte
+  for byte, where every broker driver has a permanent failure for exceeding a frame or a
+  `message.max.bytes`.
+
+  **Cleaning the inbox is the consumer's.** The janitor sweeps the outbox and never touches the
+  destination, so the inbox grows until its owner cleans it — quietly, because nothing on the
+  dispatcher's side is looking. It is the one failure of this driver that surfaces six months later
+  rather than immediately, which is why it is stated in three places rather than one.
+
+  **No fan-out.** An inbox is point-to-point, so one event reaching three consumers means the
+  producer writing three rows. Where a fan-out is wanted, a broker is still the right tool, and the
+  documentation says so rather than leaving it to be discovered on the second subscriber.
+
+- **Three use cases for it**, one page each:
+  [a modular monolith with no broker at all](docs/usecases/7-inbox-monolith.md),
+  [two services delivering into each other's inbox](docs/usecases/8-inbox-two-services.md), and
+  [dead letters in a table rather than a topic](docs/usecases/9-dlq-table.md) — which needs no code
+  change, because the forwarder already publishes through the router.
+
+### Changed
+
+- `config.DBConfig.ConnString` replaces the unexported DSN assembly in `internal/store`. The pool
+  is no longer the only thing that needs it: a driver delivering into PostgreSQL has to be able to
+  say "the same database the dispatcher reads from" without repeating how that database is
+  described.
+
 - **`pkg/outboxsql`**, the producer client for everybody not on pgx. `pkg/outboxclient` takes a
   `pgx.Tx`, which is the wrong dependency to force on a codebase that chose `sqlx`, `gorm` or the
   standard library. The new one takes anything with `ExecContext` and imports no driver at all.

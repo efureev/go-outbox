@@ -3,8 +3,6 @@ package store
 import (
 	"context"
 	"fmt"
-	"net"
-	"net/url"
 	"strconv"
 	"time"
 
@@ -15,12 +13,12 @@ import (
 
 // NewPool opens the connection pool and verifies it is usable.
 //
-// The DSN is either given whole or assembled through net/url, which escapes
+// The connection string is assembled by config.DBConfig.ConnString, which escapes
 // each component. Concatenating a keyword/value string by hand means a password
 // containing a space or a quote produces a DSN that parses into something else
 // entirely.
 func NewPool(ctx context.Context, cfg config.DBConfig, appName string) (*pgxpool.Pool, error) {
-	poolCfg, err := pgxpool.ParseConfig(dsn(cfg))
+	poolCfg, err := pgxpool.ParseConfig(cfg.ConnString())
 	if err != nil {
 		return nil, fmt.Errorf("parse database DSN: %w", err)
 	}
@@ -66,25 +64,4 @@ func pingTimeout(connect time.Duration) time.Duration {
 	}
 
 	return 5 * time.Second
-}
-
-func dsn(cfg config.DBConfig) string {
-	if cfg.DSN != "" {
-		return cfg.DSN
-	}
-
-	u := url.URL{
-		Scheme: "postgres",
-		User:   url.UserPassword(cfg.User, cfg.Password),
-		Host:   net.JoinHostPort(cfg.Host, strconv.Itoa(cfg.Port)),
-		Path:   "/" + cfg.Name,
-	}
-
-	q := url.Values{}
-	if cfg.SSLMode != "" {
-		q.Set("sslmode", cfg.SSLMode)
-	}
-	u.RawQuery = q.Encode()
-
-	return u.String()
 }
