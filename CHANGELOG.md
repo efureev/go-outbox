@@ -6,6 +6,125 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.7.0] — 2026-08-19
+
+No new features. This one is about whether the previous six releases do what they say, and the
+answer turned out to be "mostly" — a shipped recipe did not work at all, and a piece of advice
+credited the wrong thing.
+
+### Fixed
+
+- **The grant in [use case 8](docs/usecases/8-inbox-two-services.md) was wrong, and a deployment
+  that followed it could not deliver a single message.** The recipe said `GRANT INSERT` and, in a
+  comment, "and nothing else: no SELECT". The driver inserts with `ON CONFLICT (id) DO NOTHING`,
+  and PostgreSQL requires read access on a table when `ON CONFLICT` names a target: every batch
+  came back `42501 permission denied`.
+
+  Measured rather than reasoned about, because the two forms differ in more than their grant:
+
+  | Form | Requires | Suppresses |
+  |---|---|---|
+  | `ON CONFLICT (id) DO NOTHING` | `INSERT` **and `SELECT`** | a repeat of the same id |
+  | `ON CONFLICT DO NOTHING` | `INSERT` | **any** unique violation, silently |
+
+  The target-less form would have kept the narrow grant. It also swallowed a message with a fresh
+  id and a taken business key and reported success — three inserts, one row. So the conflict target
+  stays and the grant widens to `GRANT INSERT, SELECT`: a lost message is worse than a read
+  privilege. The recipe, the driver's comment and a test that asserts the role still cannot
+  `UPDATE` or `DELETE` now say the same thing.
+
+- **`outbox migrate <typo>` answered a mistyped action with two lines about `OUTBOX_DB_USER`.** The
+  configuration was loaded before the action was checked, so an operator who typed `migrate down`
+  on a machine without database credentials was told about the credentials. Checking the action
+  costs nothing and now comes first.
+
+- **[Use case 6](docs/usecases/6-database-sql.md) credited pgx with the batch protocol's win.** It
+  advised a producer writing hundreds of messages per transaction to move to `pkg/outboxclient` and
+  pgx. Measured in three arms — pgx batched, pgx looped, `database/sql` looped — the two loops are
+  indistinguishable at 116 against 116 microseconds per message at a hundred, and 109 against 111 at
+  five hundred, with the spread within a single arm wider than the gap between them. Switching
+  clients without calling `EnqueueBatch` changes nothing. The rest of the recipe held: at one
+  message per transaction all three arms sit inside the commit's shadow, and at five hundred a loop
+  adds 43 ms to a transaction a user is waiting on.
+
+### Added
+
+- **[docs/Benchmarks.md](docs/Benchmarks.md)** — every figure this changelog and the README quote,
+  each with the benchmark that produced it and the caveats that make it honest. Three benchmarks
+  were missing, and each was propping up a claim that had no number behind it.
+
+  `BenchmarkDrainDestination` runs one drain into three destinations. A table reaches **~17 700
+  msg/s against RabbitMQ's ~6 500**, or 44% of the dispatcher's own ceiling against the broker's
+  16%. That is the measurement behind "a broker is not a mandatory dependency", which until now was
+  an argument. Both destinations are containers on the same host, and the inbox is in the same
+  database as the outbox — the cheapest arrangement, not the representative one.
+
+  `BenchmarkStore*` isolates claim and write-back from the pipeline, the workers, the bus and every
+  destination: the floor no driver can go below. **The write-back costs about as much as the
+  claim** — roughly half the throughput at every batch size, which is what a confirmed publication
+  costs and is not a knob. Nacking is 20–30% dearer than acking at a batch of 500 and
+  indistinguishable below 200, which is one more thing the circuit breaker is buying: during an
+  outage the failure path is the one under load.
+
+  `BenchmarkEnqueue` measures the producer's side, inside the business transaction, which is the
+  cost a user waits on.
+
+  New targets: `make bench-destination`, `make bench-enqueue`, `make bench-store`.
+
+- **`make mutation`** — mutation testing on the three packages where it pays, pinned to
+  gremlins v0.6.0. One trap is baked into the target with its reason: gremlins derives its timeout
+  from a baseline run, and for packages whose tests take milliseconds it comes out so tight that
+  every mutant reports `TIMED OUT` and the summary reads "efficacy 0%" — which looks like a suite
+  that catches nothing rather than a tool that ran nothing.
+
+### Changed
+
+- **The administrative commands take an interface and a writer** rather than `*store.Store` and
+  `os.Stdout`. The interface is the same four operations the admin API needs, which is the claim
+  the file's own comment already made — that neither path can drift into being the one that does it
+  correctly — now written where the compiler can see it. No behaviour changes; the commands became
+  testable, going from 13.3% covered to 83%.
+
+### Testing
+
+Nothing here changes what the dispatcher does. It changes what is known about it.
+
+| | Before | After |
+|---|---|---|
+| Coverage, `internal/...` and `pkg/...` | — | **79.7%** |
+| `internal/app` | 1.7% | 49.4% |
+| `internal/observability` | 18.8% | 90.1% |
+| `cmd/outbox` | 13.3% | 83.0% |
+| `internal/dispatch` | 72.6% | 95.9% |
+| `internal/core` | 84.3% | 97.4% |
+| Mutation efficacy, `internal/config` | 68.4% | **96.1%** |
+| Mutation efficacy, the circuit breaker | 70.0% | 90.0% |
+
+Two findings are worth more than the numbers.
+
+**A whole class of validation test was wrong.** Forty of the fifty-four mutants surviving in
+`internal/config` were one mistake repeated: every rule was fed a value outside its boundary and
+never the boundary itself. `BATCH_SIZE=0` is rejected, and nothing asserted that `BATCH_SIZE=1` is
+accepted, so a comparison shifted by one survived everywhere. That is the more expensive direction —
+a rule refusing its own documented minimum refuses the configuration the documentation told the
+operator to write. Thirty rules are now exercised twice, past the boundary and exactly on it. None
+turned out to be misplaced; nothing was holding them there.
+
+**A test that passed while covering nothing.** `TestShutdownReleasesUnattemptedClaims` asserted
+`attempted + released == 9`, which held with `released == 0`: the release path it was named for ran
+zero times. It now cancels from inside `Claim`, and fails when the release call is removed.
+
+Fourteen mutants survive across the three packages and each is written down in
+[docs/TestGaps.ru.md](docs/TestGaps.ru.md) with the reason it is not worth killing — equivalent
+mutants, `os.Hostname()`, and guards that only suppress a duplicate complaint about a value another
+rule has already rejected.
+
+### Requirements
+
+- Go 1.26
+- PostgreSQL 13 or newer
+- RabbitMQ 3.8+ and/or Kafka 2.4+
+
 ## [1.6.0] — 2026-08-19
 
 The broker stops being mandatory. A dispatcher can now deliver into a table — the consumer's inbox

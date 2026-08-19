@@ -21,8 +21,10 @@ would land rather than when.
 | Supply-chain hygiene in CI | **Shipped in 1.4.0** |
 | OpenTelemetry spans | **Shipped in 1.5.0** |
 | Table partitioning, and a soak target | **Shipped in 1.5.0** |
-| NATS JetStream and Redis Streams | Planned — 1.6 |
-| A `database/sql` producer client | **Done**, not yet released |
+| A `database/sql` producer client | **Shipped in 1.6.0** |
+| PostgreSQL as a destination (an inbox) | **Shipped in 1.6.0** |
+| Close the gaps in the tests, and measure the claims | **Shipped in 1.7.0** |
+| NATS JetStream and Redis Streams | Planned — 1.8 |
 | Per-key ordering | Planned — 2.0 |
 
 What is deliberately **not** on the list, and the reasoning for each refusal, is
@@ -90,30 +92,53 @@ thing this page said it would not: the primary key becomes `(id, created_at)`,
 because PostgreSQL requires a unique constraint on a partitioned table to
 include the partition key. `make soak` shipped alongside it.
 
+**PostgreSQL as a destination** — 1.6.0. Delivery into a table, the consumer's
+inbox, in the same database or another one. It costs zero modules because pgx is
+already linked, and it takes the broker off the list of things a deployment must
+run. The reasoning and the verdict are in
+[PostgresDestination](PostgresDestination.ru.md), the design in
+[InboxSpec](InboxSpec.ru.md), and the recipes are use cases
+[7](usecases/7-inbox-monolith.md), [8](usecases/8-inbox-two-services.md) and
+[9](usecases/9-dlq-table.md).
+
+**A `database/sql` producer client** — 1.6.0.
+[`pkg/outboxsql`](../pkg/outboxsql) is the same client against `database/sql`,
+importing no driver at all, and costing the daemon nothing because the daemon
+does not import it.
+
+**Close the gaps in the tests, and measure the claims** — 1.7.0. Not one new
+feature: an audit of whether the previous six releases do what they say. Mostly
+they do. Use case 8 did not work at all — it prescribed `GRANT INSERT` and the
+driver needs `SELECT` too — and use case 6 credited pgx with a win that belongs
+to the batch protocol. The plan and the findings are in
+[TestGaps](TestGaps.ru.md); the numbers are in [Benchmarks](Benchmarks.md).
+
 Details in [the changelog](../CHANGELOG.md) and
 [Operations](Operations.md#claiming-stops-while-a-broker-is-down).
 
 ---
 
-## 1.6 — more destinations
+## 1.8 — more destinations
 
 `broker.Publisher` exists precisely so that this is cheap, and a driver is the
 clearest way to prove the interface was worth having.
 
 Specified in detail, with the size of each candidate measured rather than
-guessed, in [DriverSpec](DriverSpec.md). The measurements reorder what follows:
-Redis Streams costs four times what NATS does, and the `database/sql` client
-costs nothing at all.
+guessed, in [DriverSpec](DriverSpec.md). The measurements have already reordered
+this list twice: first the `database/sql` client, then PostgreSQL as a
+destination — both shipped in 1.6.0 and both cost nothing in binary size. Of
+what is left, Redis Streams costs four times what NATS does and offers a weaker
+guarantee, so it goes last.
 
 **NATS JetStream** first: its publish-ack maps directly onto the confirmed
 publication the dispatcher already requires, so the driver is about three
 hundred lines plus integration tests. **Redis Streams** next — `XADD` is
 inherently acknowledged. **SQS/SNS** after that, if anyone asks.
 
-**A `database/sql` producer client** — done, not yet released.
-[`pkg/outboxsql`](../pkg/outboxsql) is the same client against `database/sql`,
-importing no driver at all, and costing the daemon nothing because the daemon
-does not import it.
+The order slipped by a version: 1.7.0 went on the tests, because measuring a new
+driver while standing on unverified ground is measuring something else — and the
+first measurement bore that out by finding a recipe that did not work in a
+release already shipped.
 
 ---
 
