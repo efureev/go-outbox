@@ -6,6 +6,11 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.4.0] — 2026-08-19
+
+The operational round: the tools an operator reaches for, and the evidence that what they are
+running is what was built.
+
 ### Added
 
 - **`outbox stats`, `outbox failed` and `outbox requeue`** — the admin API's operations as

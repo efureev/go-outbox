@@ -2,7 +2,7 @@
 
 [Русская версия](Roadmap.ru.md)
 
-1.3.0 is released. What follows is what I would build next, in the order I would
+1.4.0 is released. What follows is what I would build next, in the order I would
 build it — with the reasoning for the *order*, not just the ordering. Each item
 states what it changes, why it earns its place, and what it costs.
 
@@ -16,9 +16,9 @@ would land rather than when.
 |---|---|
 | An outage must not spend the retry budget | **Shipped in 1.2.0** |
 | Stop claiming for a stream whose broker is unreachable | **Shipped in 1.3.0** |
-| CLI parity with the admin API | **Done**, not yet released |
-| A Grafana dashboard as JSON | **Done**, not yet released |
-| Supply-chain hygiene in CI | **Done**, not yet released |
+| CLI parity with the admin API | **Shipped in 1.4.0** |
+| A Grafana dashboard as JSON | **Shipped in 1.4.0** |
+| Supply-chain hygiene in CI | **Shipped in 1.4.0** |
 | OpenTelemetry spans | Planned — 1.5 |
 | Table partitioning, and a soak target | Planned — 1.6 |
 | NATS JetStream, Redis Streams, a `database/sql` client | Planned — 1.7 |
@@ -55,35 +55,26 @@ a health check is only a proxy for it — one that can be green while the exchan
 the messages need is not there.
 
 And the two shipped as 1.2.0 and 1.3.0 rather than inside one release, which is
-why the milestones below start at 1.4. Version numbers on a roadmap are a guess
-at grouping, and this one was wrong in a way worth leaving visible.
+why the milestones below start at 1.5. Version numbers on a roadmap are a guess
+at grouping, and that one was wrong in a way worth leaving visible.
+
+**The operational round** — 1.4.0. Three items an operator touches, rather than
+anything the dispatcher does differently.
+
+- `outbox stats`, `outbox failed` and `outbox requeue` reach the database
+  directly, so requeueing no longer needs curl, a token and a reachable pod.
+  They also check less of the configuration than the dispatcher does, which was
+  the part worth getting right: the moment you need to see what stopped is often
+  the moment the routing table is what is wrong.
+- [`dashboards/outbox.json`](../dashboards/outbox.json), a Grafana dashboard
+  checked against the metric set by a test, so a renamed metric cannot leave an
+  empty panel behind — and an empty panel reads as good news.
+- `govulncheck` on every CI run, a CycloneDX SBOM per platform attached to each
+  release, and keyless cosign signatures on the checksums and on the image by
+  digest.
 
 Details in [the changelog](../CHANGELOG.md) and
 [Operations](Operations.md#claiming-stops-while-a-broker-is-down).
-
----
-
-## 1.4 — finishing the operational round
-
-Complete, awaiting a release. The two items that made an outage survivable
-shipped as 1.2.0 and 1.3.0; these three are the part an operator touches — the
-tools they reach for at three in the morning, and the evidence that what they
-are running is what was built.
-
-**CLI parity with the admin API** — done, not yet released. `outbox stats`,
-`outbox failed` and `outbox requeue` reach the database directly, so requeueing
-no longer needs curl, a token and a reachable pod. They also check less of the
-configuration than the dispatcher does, which was the part worth getting right:
-the moment you need to see what stopped is often the moment the routing table is
-what is wrong.
-
-**A Grafana dashboard as JSON** — done, not yet released.
-[`dashboards/outbox.json`](../dashboards/outbox.json), checked against the metric
-set by a test so a renamed metric cannot leave an empty panel behind.
-
-**Supply-chain hygiene in CI** — done, not yet released. `govulncheck` on every
-run, a CycloneDX SBOM per platform attached to the release, and keyless cosign
-signatures on the checksums and on the image by digest.
 
 ---
 
