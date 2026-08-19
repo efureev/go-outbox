@@ -1,8 +1,10 @@
 package config
 
 import (
+	"errors"
 	"fmt"
 	"iter"
+	"net/url"
 	"slices"
 	"strconv"
 	"strings"
@@ -64,6 +66,11 @@ type DriverConfig interface {
 	Name() string
 	Type() DriverType
 	Naming() Naming
+	// Endpoint reports where the driver connects, with any credentials removed.
+	// It is what lets an operator confirm that a stream reaches the instance
+	// they meant: the driver name and prefix alone look identical whether the
+	// DSN points at the right broker or the wrong one.
+	Endpoint() string
 }
 
 // Naming assembles the effective topic or queue name from its parts:
@@ -115,6 +122,10 @@ func (d *RabbitMQDriver) Name() string   { return d.name }
 func (*RabbitMQDriver) Type() DriverType { return DriverRabbitMQ }
 func (d *RabbitMQDriver) Naming() Naming { return d.naming }
 
+// Endpoint is the DSN with its user info stripped, so it can be logged and
+// served over HTTP without leaking the password.
+func (d *RabbitMQDriver) Endpoint() string { return redactDSN(d.DSN) }
+
 // KafkaDriver configures one Kafka writer.
 type KafkaDriver struct {
 	name   string
@@ -141,6 +152,9 @@ type KafkaDriver struct {
 func (d *KafkaDriver) Name() string   { return d.name }
 func (*KafkaDriver) Type() DriverType { return DriverKafka }
 func (d *KafkaDriver) Naming() Naming { return d.naming }
+
+// Endpoint lists the configured brokers; Kafka addresses carry no credentials.
+func (d *KafkaDriver) Endpoint() string { return strings.Join(d.Brokers, ",") }
 
 const (
 	keyStreams      = "OUTBOX_STREAMS"
@@ -211,16 +225,53 @@ func loadBrokers(src Source) (BrokerConfig, error) {
 		}
 	}
 
+	if err := rejectCollidingNames(driverNames); err != nil {
+		return empty, err
+	}
+
+	// Every driver is attempted, and the failures are reported together: with
+	// several drivers configured, stopping at the first one turns fixing the
+	// routing table into one restart per mistake.
 	drivers := make(map[string]DriverConfig, len(driverNames))
+
+	var errs []error
+
 	for _, name := range driverNames {
 		d, err := loadDriver(src, name, driverNames)
 		if err != nil {
-			return empty, fmt.Errorf("driver %q: %w", name, err)
+			errs = append(errs, fmt.Errorf("driver %q: %w", name, err))
+
+			continue
 		}
 		drivers[name] = d
 	}
 
+	if len(errs) > 0 {
+		return empty, errors.Join(errs...)
+	}
+
 	return BrokerConfig{Streams: streams, Drivers: drivers}, nil
+}
+
+// rejectCollidingNames catches driver names that differ only in a character
+// envToken normalises away: "rmq-local" and "rmq_local" both address
+// OUTBOX_DRIVER_RMQ_LOCAL_, so they would silently become two drivers reading
+// one settings block — two connections to the same broker, where the operator
+// meant two brokers.
+func rejectCollidingNames(names []string) error {
+	seen := make(map[string]string, len(names))
+
+	for _, name := range names {
+		token := envToken(name)
+		if other, clash := seen[token]; clash {
+			return fmt.Errorf(
+				"drivers %q and %q both read %s* — rename one so their settings are distinguishable",
+				other, name, fmt.Sprintf(driverPrefixFmt, token))
+		}
+		seen[token] = name
+	}
+
+	return nil
 }
 
 func loadDriver(src Source, name string, allNames []string) (DriverConfig, error) {
@@ -368,4 +419,18 @@ func orDefault(v, def string) string {
 	}
 
 	return v
+}
+
+// redactDSN removes the user info from a URL so it can be logged or served.
+// A DSN that will not parse is reported as unavailable rather than echoed, on
+// the chance that the unparsed text is exactly the password.
+func redactDSN(dsn string) string {
+	u, err := url.Parse(dsn)
+	if err != nil {
+		return "unparseable"
+	}
+
+	u.User = nil
+
+	return u.String()
 }

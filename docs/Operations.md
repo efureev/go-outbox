@@ -162,6 +162,50 @@ If the shutdown budget is exceeded the logs say so, and the leases involved
 expire on their own — nothing is lost, but delivery of those messages waits out
 `LEASE_TTL`.
 
+## What happens when a dependency fails
+
+Each of these is covered by a test in `test/integration/resilience_test.go`, which
+severs the connection through a proxy rather than describing what ought to happen.
+
+| Failure | Behaviour |
+|---|---|
+| A broker goes down while running | Contained. Only the streams pointed at it stall; the rest keep publishing. Their messages retry with backoff and nothing is lost. |
+| That broker comes back | Reconnects on its own, with no restart and no intervention. The supervisor redials with an exponential delay up to 30s. |
+| PostgreSQL goes down | Delivery stalls; the process stays up and does not spin. Claims fail once per poll interval and are logged. `/ready` reports unhealthy, so an orchestrator stops routing to it. |
+| PostgreSQL comes back | The pool reconnects, the notification listener re-listens, delivery resumes. |
+| Everything goes down at once | The two above, together. Recovery needs no particular order. |
+| An outage longer than the retry budget | Messages stop being retried and land in `failed`, with the broker's own words in `last_error`. They stay in the table and wait for a requeue. |
+| A broker unreachable **at startup** | The process refuses to start. This is the asymmetry to know about: a broker that dies while running is contained, but one that is already dead when the dispatcher boots stops every stream, not just its own. |
+
+### How long an outage the defaults survive
+
+The retry budget is the sum of the backoff delays before the attempts run out. On
+the defaults — `MAX_ATTEMPTS=5`, `BACKOFF_BASE=1m`, `BACKOFF_MAX=1h` — that is
+1 + 2 + 4 + 8 minutes:
+
+```
+15 minutes
+```
+
+An outage shorter than that is absorbed entirely: the messages sit in `pending`
+and go out when the broker returns. An outage longer than that consumes the
+budget, and whatever was still undelivered ends in `failed` awaiting
+`POST /api/v1/messages/requeue`.
+
+Buy more time by raising `OUTBOX_DISPATCH_MAX_ATTEMPTS`, which is cheap because
+each extra attempt doubles the delay before it:
+
+| `MAX_ATTEMPTS` | Outage survived |
+|---|---|
+| 5 (default) | 15 minutes |
+| 8 | 2 hours |
+| 10 | 4 hours |
+
+The cost is that a genuinely undeliverable message — one the broker will always
+reject — takes correspondingly longer to reach `failed` and become visible. It
+does not cost throughput: a message in backoff is not claimed, so it occupies
+nothing but a row.
+
 ## Latency
 
 With `OUTBOX_DISPATCH_NOTIFY_ENABLED=true` a trigger announces each insert and

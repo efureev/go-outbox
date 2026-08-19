@@ -457,3 +457,77 @@ func consumeKafka(t testing.TB, topic string, want int) []segmentio.Message {
 
 	return out
 }
+
+// Two drivers may point at one broker, and they stay independent: their own
+// connection, their own channel pool, their own naming. It is what makes the
+// documented "local and tetra share an instance" arrangement work.
+//
+// The risk this pins down is an optimisation that looks harmless — deduplicating
+// publishers by DSN — after which the second driver would silently publish
+// through the first one's pool and prefix.
+func TestTwoDriversMayShareABrokerAndStayIndependent(t *testing.T) {
+	base := uniqueName("shared")
+
+	cfg, err := config.LoadFrom(env(t,
+		"OUTBOX_DB_USER=outbox",
+		"OUTBOX_DB_NAME=outbox",
+		"OUTBOX_STREAMS=local,tetra",
+		"OUTBOX_STREAM_LOCAL_DRIVER=rmq_local",
+		"OUTBOX_STREAM_TETRA_DRIVER=rmq_tetra",
+
+		"OUTBOX_DRIVER_RMQ_LOCAL_TYPE=rabbitmq",
+		"OUTBOX_DRIVER_RMQ_LOCAL_DSN="+amqpDSN(),
+		"OUTBOX_DRIVER_RMQ_LOCAL_DECLARE=true",
+		"OUTBOX_DRIVER_RMQ_LOCAL_PREFIX="+base+"loc",
+
+		// The same instance, a driver of its own.
+		"OUTBOX_DRIVER_RMQ_TETRA_TYPE=rabbitmq",
+		"OUTBOX_DRIVER_RMQ_TETRA_DSN="+amqpDSN(),
+		"OUTBOX_DRIVER_RMQ_TETRA_DECLARE=true",
+		"OUTBOX_DRIVER_RMQ_TETRA_PREFIX="+base+"ttr",
+	))
+	if err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+
+	publishers := map[string]broker.Publisher{}
+	for name, driver := range cfg.Brokers.Drivers {
+		d, ok := driver.(*config.RabbitMQDriver)
+		if !ok {
+			t.Fatalf("driver %q is %T", name, driver)
+		}
+
+		p, err := rabbitmq.New(t.Context(), d, logging.Nop())
+		if err != nil {
+			t.Fatalf("connect %q: %v", name, err)
+		}
+		t.Cleanup(func() { _ = p.Close(context.WithoutCancel(t.Context())) })
+
+		publishers[name] = p
+	}
+
+	if publishers["rmq_local"] == publishers["rmq_tetra"] {
+		t.Fatal("the two drivers share one publisher; each must own its connection")
+	}
+
+	router, err := broker.NewRouter(cfg.Brokers, publishers)
+	if err != nil {
+		t.Fatalf("router: %v", err)
+	}
+
+	const topic = "orders.placed"
+	for _, stream := range []string{"local", "tetra"} {
+		if err := router.Publish(t.Context(), stream,
+			[]core.Message{message(newID(), topic, []byte(`{}`))})[0]; err != nil {
+			t.Fatalf("publish to %s: %v", stream, err)
+		}
+	}
+
+	// Each driver's own prefix, so the messages are addressable apart even
+	// though one broker holds them both.
+	for _, want := range []string{base + "loc_" + topic, base + "ttr_" + topic} {
+		if got := consumeOne(t, want); len(got.Body) == 0 {
+			t.Errorf("nothing arrived on %s", want)
+		}
+	}
+}

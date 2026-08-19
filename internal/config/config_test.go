@@ -289,3 +289,83 @@ func TestSeveralBrokersOfTheSameType(t *testing.T) {
 		}
 	}
 }
+
+// Two names that differ only in a character envToken normalises away address
+// one settings block. Left unchecked they become two drivers with identical
+// settings — two connections to one broker, where two brokers were meant.
+func TestCollidingDriverNamesAreRejected(t *testing.T) {
+	_, err := LoadFrom(env(t,
+		"OUTBOX_DB_USER=outbox",
+		"OUTBOX_DB_NAME=app",
+		"OUTBOX_STREAMS=a,b",
+		"OUTBOX_STREAM_A_DRIVER=rmq-local",
+		"OUTBOX_STREAM_B_DRIVER=rmq_local",
+		"OUTBOX_DRIVER_RMQ_LOCAL_TYPE=rabbitmq",
+		"OUTBOX_DRIVER_RMQ_LOCAL_DSN=amqp://localhost:5672/",
+	))
+	if err == nil {
+		t.Fatal("two driver names sharing one environment namespace must be rejected")
+	}
+	if !strings.Contains(err.Error(), "rmq-local") || !strings.Contains(err.Error(), "rmq_local") {
+		t.Errorf("the error should name both drivers, got: %v", err)
+	}
+}
+
+// A broken routing table must report every driver at once, for the same reason
+// the rest of the configuration does.
+func TestEveryBadDriverIsReportedTogether(t *testing.T) {
+	_, err := LoadFrom(env(t,
+		"OUTBOX_DB_USER=outbox",
+		"OUTBOX_DB_NAME=app",
+		"OUTBOX_STREAMS=one,two,three",
+		"OUTBOX_STREAM_ONE_DRIVER=rmq_one",
+		"OUTBOX_STREAM_TWO_DRIVER=rmq_two",
+		"OUTBOX_STREAM_THREE_DRIVER=rmq_three",
+		// Each is missing its DSN.
+		"OUTBOX_DRIVER_RMQ_ONE_TYPE=rabbitmq",
+		"OUTBOX_DRIVER_RMQ_TWO_TYPE=rabbitmq",
+		"OUTBOX_DRIVER_RMQ_THREE_TYPE=rabbitmq",
+	))
+	if err == nil {
+		t.Fatal("expected the load to fail")
+	}
+
+	for _, want := range []string{"rmq_one", "rmq_two", "rmq_three"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("driver %q is missing from the report; one restart per mistake is what this avoids:\n%v",
+				want, err)
+		}
+	}
+}
+
+// The endpoint is what makes /api/v1/stats able to tell a stream pointed at the
+// right broker from one pointed at the wrong one — and it must not carry the
+// password there.
+func TestEndpointReportsTheBrokerWithoutCredentials(t *testing.T) {
+	cfg, err := LoadFrom(env(t,
+		"OUTBOX_DB_USER=outbox",
+		"OUTBOX_DB_NAME=app",
+		"OUTBOX_STREAMS=local,global",
+		"OUTBOX_STREAM_LOCAL_DRIVER=rmq",
+		"OUTBOX_STREAM_GLOBAL_DRIVER=kfk",
+		"OUTBOX_DRIVER_RMQ_TYPE=rabbitmq",
+		"OUTBOX_DRIVER_RMQ_DSN=amqp://user:hunter2@rabbit-a:5672/",
+		"OUTBOX_DRIVER_KFK_TYPE=kafka",
+		"OUTBOX_DRIVER_KFK_BROKERS=kafka-1:9092,kafka-2:9092",
+	))
+	if err != nil {
+		t.Fatalf("LoadFrom: %v", err)
+	}
+
+	rmq := cfg.Brokers.Drivers["rmq"].Endpoint()
+	if strings.Contains(rmq, "hunter2") {
+		t.Errorf("the endpoint leaks the password: %q", rmq)
+	}
+	if !strings.Contains(rmq, "rabbit-a:5672") {
+		t.Errorf("endpoint = %q, want the host so the instance is identifiable", rmq)
+	}
+
+	if got := cfg.Brokers.Drivers["kfk"].Endpoint(); got != "kafka-1:9092,kafka-2:9092" {
+		t.Errorf("kafka endpoint = %q, want the broker list", got)
+	}
+}

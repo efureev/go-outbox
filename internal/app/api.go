@@ -4,6 +4,7 @@ import (
 	"crypto/subtle"
 	"encoding/json"
 	"net/http"
+	"slices"
 	"strconv"
 	"time"
 
@@ -51,6 +52,11 @@ type streamInfo struct {
 type driverInfo struct {
 	Name string `json:"name"`
 	Type string `json:"type"`
+	// Endpoint is where this driver connects, with credentials removed. Without
+	// it two drivers pointed at different brokers render identically, so the
+	// response could not be used to confirm that a stream reaches the instance
+	// it was meant to.
+	Endpoint string `json:"endpoint"`
 	// Prefix and the separators are what a consumer needs to work out the
 	// effective topic name it must subscribe to.
 	Prefix     string `json:"prefix,omitempty"`
@@ -267,12 +273,23 @@ func streamsOf(cfg config.BrokerConfig) []streamInfo {
 }
 
 func driversOf(cfg config.BrokerConfig) []driverInfo {
-	out := make([]driverInfo, 0, len(cfg.Drivers))
-	for name, d := range cfg.Drivers {
+	// Sorted, like the streams above: iterating the map directly would reorder
+	// the array on every request, and comparing two captures is exactly what
+	// this endpoint is for.
+	names := make([]string, 0, len(cfg.Drivers))
+	for name := range cfg.Drivers {
+		names = append(names, name)
+	}
+	slices.Sort(names)
+
+	out := make([]driverInfo, 0, len(names))
+	for _, name := range names {
+		d := cfg.Drivers[name]
 		naming := d.Naming()
 		out = append(out, driverInfo{
 			Name:       name,
 			Type:       string(d.Type()),
+			Endpoint:   d.Endpoint(),
 			Prefix:     naming.Prefix,
 			PrefixSep:  naming.PrefixSep,
 			VersionSep: naming.VersionSep,

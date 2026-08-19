@@ -25,19 +25,21 @@ application beyond one `INSERT`.
   write-back must present, so a replica whose lease expired mid-flight cannot
   overwrite what another already delivered. The schema enforces it, not a convention.
 
-- **Fast, and you can check.** ~7 800 msg/s through RabbitMQ with confirms on;
-  ~12 000 with the channel pool widened; ~46 000 with the broker taken out of the
-  picture — the dispatcher is never the bottleneck. `make bench` reproduces every
-  figure on your own hardware.
+- **Fast, and you can check.** ~7 300 msg/s through RabbitMQ with confirms on;
+  ~12 000 with workers and the channel pool widened together; ~46 000 with the broker
+  taken out of the picture — the dispatcher is never the bottleneck. `make bench`
+  reproduces every figure on your own hardware.
 
 - **Milliseconds, not poll intervals.** A trigger wakes the pipeline the moment a row
-  is written: ~5 ms from insert to broker. Polling stays on as reconciliation, so a
-  lost notification costs one interval and never a message.
+  is written — ~105 ms end to end on the shipped defaults, ~5 ms once the debounce
+  window and the replica jitter are tuned away. Polling stays on as reconciliation, so
+  a lost notification costs one interval and never a message.
 
 - **Many brokers at once.** Four streams across three RabbitMQ instances and a Kafka
   cluster is a configuration, not a fork. A producer picks its destination with one
-  column, and each stream gets its own pipeline — a broker that is down delays only
-  the streams pointed at it.
+  column, and each stream gets its own pipeline, so a broker that goes down while
+  running delays only the streams pointed at it. (Every broker must be reachable at
+  startup: one that is not fails the boot rather than starting half a dispatcher.)
 
 - **Recovers on its own.** A replica killed mid-batch leaves rows leased; the lease
   expires and another picks them up. A clean shutdown does not even wait for that —
@@ -52,7 +54,8 @@ application beyond one `INSERT`.
   dependencies, no web framework, no DI container.
 
 - **Fails at boot, not at 3am.** The whole configuration is read and validated before
-  anything connects, and every problem is reported at once — a misconfigured
+  anything connects, and every problem is reported together — a bad threshold, a
+  misspelled driver key, three drivers each missing a DSN — so a misconfigured
   deployment takes one restart to diagnose rather than one per mistake.
 
 - **Proven, not asserted.** 103 tests, half of them against real PostgreSQL, RabbitMQ

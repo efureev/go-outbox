@@ -26,10 +26,10 @@ type JanitorEmitter interface {
 }
 
 // Task identifiers, used as the second half of the advisory lock key so the
-// three jobs do not exclude one another.
+// jobs do not exclude one another. Sampling the gauges takes no lock; see
+// SampleStats.
 const (
 	taskReclaim   int32 = 1
-	taskStats     int32 = 2
 	taskRetention int32 = 3
 )
 
@@ -135,21 +135,28 @@ func (j *Janitor) ReclaimExpired(ctx context.Context) {
 }
 
 // SampleStats refreshes the backlog gauges.
+//
+// Unlike the other two cycles this runs on every replica, without the advisory
+// lock. A gauge that only the lock holder refreshes leaves every other replica
+// exporting its zero value forever, so a dashboard reading one series — or
+// averaging them — reports an empty backlog while the queue grows. The query is
+// four index-only counts on a slow tick; paying for it per replica is cheaper
+// than a metric that is wrong on all but one of them.
 func (j *Janitor) SampleStats(ctx context.Context) {
-	j.exclusive(ctx, taskStats, "stats", func(ctx context.Context) error {
-		st, err := j.store.Stats(ctx)
-		if err != nil {
-			return err
+	st, err := j.store.Stats(ctx)
+	if err != nil {
+		if ctx.Err() == nil {
+			j.log.Error("housekeeping task failed", slog.String("task", "stats"), slog.Any("error", err))
 		}
 
-		j.emitter.Stats(ctx, events.Stats{
-			Pending:       st.Pending,
-			Processing:    st.Processing,
-			Failed:        st.Failed,
-			OldestPending: st.OldestPending,
-		})
+		return
+	}
 
-		return nil
+	j.emitter.Stats(ctx, events.Stats{
+		Pending:       st.Pending,
+		Processing:    st.Processing,
+		Failed:        st.Failed,
+		OldestPending: st.OldestPending,
 	})
 }
 

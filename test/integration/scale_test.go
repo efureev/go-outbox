@@ -206,7 +206,8 @@ func TestWorkOfADeadReplicaIsRecoveredByAnother(t *testing.T) {
 	}
 }
 
-// The advisory lock is what keeps housekeeping from running on every replica at
+// The advisory lock is what keeps the work-doing housekeeping — returning
+// expired leases, sweeping delivered rows — from running on every replica at
 // once.
 func TestHousekeepingRunsOnOneReplicaAtATime(t *testing.T) {
 	f := newFixture(t)
@@ -214,8 +215,15 @@ func TestHousekeepingRunsOnOneReplicaAtATime(t *testing.T) {
 
 	cfg := scaleConfig(t, f)
 
-	// Hold the stats lock as if another replica had it.
-	release, ok, err := f.Store.TryLock(t.Context(), cfg.Janitor.LockKey, 2)
+	// Leave an expired lease for the reclaimer to find.
+	claimed, err := f.Store.Claim(t.Context(), "local", 5, lease("dead", time.Minute))
+	if err != nil {
+		t.Fatalf("claim: %v", err)
+	}
+	f.expire(t, ids(claimed)...)
+
+	// Hold the reclaim lock as if another replica had it.
+	release, ok, err := f.Store.TryLock(t.Context(), cfg.Janitor.LockKey, reclaimTask)
 	if err != nil {
 		t.Fatalf("try lock: %v", err)
 	}
@@ -224,44 +232,102 @@ func TestHousekeepingRunsOnOneReplicaAtATime(t *testing.T) {
 	}
 	defer release()
 
-	rec := &statsRecorder{}
+	rec := &housekeepingRecorder{}
 	janitor := dispatch.NewJanitor(f.Store, rec, cfg, logging.Nop())
 
-	janitor.SampleStats(t.Context())
+	janitor.ReclaimExpired(t.Context())
 
-	if rec.count() != 0 {
-		t.Errorf("housekeeping ran %d times while another replica held the lock, want 0", rec.count())
+	if got := rec.reclaimed(); got != 0 {
+		t.Errorf("reclaimed %d leases while another replica held the lock, want 0", got)
 	}
 
 	release()
 
-	janitor.SampleStats(t.Context())
+	janitor.ReclaimExpired(t.Context())
 
-	if rec.count() != 1 {
-		t.Errorf("housekeeping ran %d times after the lock was free, want 1", rec.count())
+	if got := rec.reclaimed(); got != 5 {
+		t.Errorf("reclaimed %d leases once the lock was free, want 5", got)
 	}
 }
 
-type statsRecorder struct {
-	mu      sync.Mutex
-	samples []events.Stats
+// Sampling the gauges is deliberately not behind the lock. A gauge only the
+// lock holder refreshes leaves every other replica exporting its zero value, so
+// a dashboard reading one series reports an empty backlog while the queue grows.
+func TestGaugesAreSampledByEveryReplica(t *testing.T) {
+	f := newFixture(t)
+	f.seed(t, "local", 3)
+
+	cfg := scaleConfig(t, f)
+
+	// Another replica holds every housekeeping lock this janitor might want.
+	for _, task := range []int32{reclaimTask, retentionTask} {
+		release, ok, err := f.Store.TryLock(t.Context(), cfg.Janitor.LockKey, task)
+		if err != nil {
+			t.Fatalf("try lock: %v", err)
+		}
+		if !ok {
+			t.Fatalf("could not take lock %d to set the test up", task)
+		}
+		defer release()
+	}
+
+	rec := &housekeepingRecorder{}
+	janitor := dispatch.NewJanitor(f.Store, rec, cfg, logging.Nop())
+
+	janitor.SampleStats(t.Context())
+
+	samples := rec.stats()
+	if len(samples) != 1 {
+		t.Fatalf("%d samples taken while the locks were held, want 1", len(samples))
+	}
+	if samples[0].Pending != 3 {
+		t.Errorf("Pending = %d, want 3", samples[0].Pending)
+	}
+	if samples[0].OldestPending <= 0 {
+		t.Error("OldestPending is zero; every replica must report a real backlog age")
+	}
 }
 
-func (r *statsRecorder) Stats(_ context.Context, ev events.Stats) {
+// Task identifiers, mirroring the unexported ones in the dispatch package.
+const (
+	reclaimTask   int32 = 1
+	retentionTask int32 = 3
+)
+
+type housekeepingRecorder struct {
+	mu       sync.Mutex
+	samples  []events.Stats
+	reclaims []events.Reclaimed
+}
+
+func (r *housekeepingRecorder) Stats(_ context.Context, ev events.Stats) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
 	r.samples = append(r.samples, ev)
 }
 
-func (r *statsRecorder) Reclaimed(context.Context, events.Reclaimed) {}
-func (r *statsRecorder) Retention(context.Context, events.Retention) {}
-
-func (r *statsRecorder) count() int {
+func (r *housekeepingRecorder) Reclaimed(_ context.Context, ev events.Reclaimed) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	return len(r.samples)
+	r.reclaims = append(r.reclaims, ev)
+}
+
+func (r *housekeepingRecorder) Retention(context.Context, events.Retention) {}
+
+func (r *housekeepingRecorder) stats() []events.Stats {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	return append([]events.Stats(nil), r.samples...)
+}
+
+func (r *housekeepingRecorder) reclaimed() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	return len(r.reclaims)
 }
 
 func scaleConfig(t testing.TB, f *fixture) config.Config {

@@ -70,50 +70,26 @@ OUTBOX_DRIVER_KFK_BROKERS=kafka-1:9092,kafka-2:9092
 
 Драйвер не привязан к *типу* брокера — драйвер это одно соединение, и их может
 быть столько, сколько брокеров нужно достать. Четыре стрима на трёх отдельных
-инстансах RabbitMQ:
+инстансах RabbitMQ — это четыре блока драйверов, у каждого свой DSN:
 
 ```dotenv
 OUTBOX_STREAMS=local,test,global,tetra
 
 OUTBOX_STREAM_LOCAL_DRIVER=rmq_local
-OUTBOX_STREAM_TEST_DRIVER=rmq_test
-OUTBOX_STREAM_GLOBAL_DRIVER=rmq_global
-OUTBOX_STREAM_TETRA_DRIVER=rmq_tetra
-
 OUTBOX_DRIVER_RMQ_LOCAL_TYPE=rabbitmq
 OUTBOX_DRIVER_RMQ_LOCAL_DSN=amqp://user:pass@rabbit-a:5672/
 OUTBOX_DRIVER_RMQ_LOCAL_PREFIX=loc
 
-OUTBOX_DRIVER_RMQ_TEST_TYPE=rabbitmq
-OUTBOX_DRIVER_RMQ_TEST_DSN=amqp://user:pass@rabbit-b:5672/
-OUTBOX_DRIVER_RMQ_TEST_PREFIX=tst
-
-OUTBOX_DRIVER_RMQ_GLOBAL_TYPE=rabbitmq
-OUTBOX_DRIVER_RMQ_GLOBAL_DSN=amqp://user:pass@rabbit-c:5672/
-OUTBOX_DRIVER_RMQ_GLOBAL_PREFIX=glb
-
-# Снова первый инстанс, но отдельным драйвером: своё соединение, свой пул
-# каналов и своё именование.
-OUTBOX_DRIVER_RMQ_TETRA_TYPE=rabbitmq
-OUTBOX_DRIVER_RMQ_TETRA_DSN=amqp://user:pass@rabbit-a:5672/
-OUTBOX_DRIVER_RMQ_TETRA_PREFIX=ttr
+# …и так далее для rmq_test, rmq_global и rmq_tetra.
 ```
 
-Продюсер выбирает направление одной колонкой:
+Два драйвера могут смотреть в один брокер и остаются независимыми: у каждого своё
+соединение, свой пул каналов и своё именование. Имена драйверов, различающиеся
+только `-` против `_`, отвергаются на старте — оба адресуют один и тот же блок
+`OUTBOX_DRIVER_…`.
 
-```sql
-INSERT INTO outbox.messages (id, stream, topic, payload, target)
-VALUES (gen_random_uuid(), 'tetra', 'orders.placed', convert_to('{}', 'UTF8'), '{}');
-```
-
-Два следствия, которые стоит знать. У каждого стрима свой пайплайн, поэтому
-лежащий инстанс задерживает только адресованные ему стримы — остальные
-продолжают публиковаться. И у каждого драйвера собственное соединение и пул
-каналов, так что `CHANNELS` и параллелизм публикации считаются на драйвер, а не
-на всех вместе.
-
-`GET /api/v1/stats` показывает получившееся сопоставление — самый быстрый способ
-убедиться, что стрим уходит в тот инстанс, который вы имели в виду.
+Разобранный пример со всеми подводными камнями — в
+[сценарии 5](UseCases.ru.md#5-четыре-стрима-на-трёх-инстансах-rabbitmq).
 
 ### Общее для всех драйверов
 
