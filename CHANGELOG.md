@@ -114,10 +114,9 @@ turned out to be misplaced; nothing was holding them there.
 `attempted + released == 9`, which held with `released == 0`: the release path it was named for ran
 zero times. It now cancels from inside `Claim`, and fails when the release call is removed.
 
-Fourteen mutants survive across the three packages and each is written down in
-[docs/TestGaps.ru.md](docs/TestGaps.ru.md) with the reason it is not worth killing — equivalent
-mutants, `os.Hostname()`, and guards that only suppress a duplicate complaint about a value another
-rule has already rejected.
+Fourteen mutants survive across the three packages and each is written down in the test file for
+its package, with the reason it is not worth killing — equivalent mutants, `os.Hostname()`, and
+guards that only suppress a duplicate complaint about a value another rule has already rejected.
 
 ### Requirements
 

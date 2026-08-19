@@ -1,5 +1,14 @@
 package core
 
+// Six mutants survive `make mutation` in this package and none is worth a test.
+// Five are boundaries where both branches assign the same value — `exp < 0`
+// becoming `<= 0` assigns zero to a value that is already zero, and the same
+// holds at the exponent cap, the Max clamp and the negative-delay guard. The
+// sixth flips the sign of the jitter term in `delay *= 1 + Jitter*(2*rand-1)`:
+// the spread is symmetric about zero, so negating it draws from the same
+// distribution. Killing that one means seeding the generator, and math/rand/v2
+// does not let you.
+
 import (
 	"testing"
 	"time"

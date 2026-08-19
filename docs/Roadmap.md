@@ -110,8 +110,9 @@ does not import it.
 feature: an audit of whether the previous six releases do what they say. Mostly
 they do. Use case 8 did not work at all — it prescribed `GRANT INSERT` and the
 driver needs `SELECT` too — and use case 6 credited pgx with a win that belongs
-to the batch protocol. The plan and the findings are in
-[TestGaps](TestGaps.ru.md); the numbers are in [Benchmarks](Benchmarks.md).
+to the batch protocol. The numbers are in [Benchmarks](Benchmarks.md); the
+reasons each surviving mutant is not worth killing are in the test file for its
+package.
 
 Details in [the changelog](../CHANGELOG.md) and
 [Operations](Operations.md#claiming-stops-while-a-broker-is-down).

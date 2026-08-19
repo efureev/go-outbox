@@ -128,6 +128,10 @@ func TestBreakerCeilingOfZeroDisablesIt(t *testing.T) {
 	}
 }
 
+// One mutant survives `make mutation` here, and it is equivalent: `next <=
+// ceiling` becoming `<` sends an exactly-equal doubling down the else branch,
+// which assigns the ceiling — the same value the taken branch would have.
+//
 // The first pause is defaulted rather than trusted. Zero would make the breaker
 // open and immediately expire — it would report claims held back while holding
 // nothing back, which is worse than not having one: the metric says the stream

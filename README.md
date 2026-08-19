@@ -279,6 +279,7 @@ make test               # unit tests
 make test-integration   # integration tests against the real thing
 make soak SOAK=1h       # the same failures, under load, for as long as you like
 make bench              # the numbers quoted in the changelog
+make mutation           # mutation testing, where it pays
 make lint               # golangci-lint, in a container pinned to the CI version
 make fmt
 ```
@@ -292,6 +293,20 @@ matters more than matching CI exactly.
 The integration tests carry the weight of the suite on purpose: this is a set of
 concurrency and ownership rules expressed in SQL, and those cannot be checked by
 asserting that a query string has not changed.
+
+Coverage sits at **79.7%** across `internal/` and `pkg/`, and 100% is neither
+reachable nor the goal: `main`, `runServer` and the module constructors are only
+exercised by starting the process, and a test on them would measure `net/http`.
+The gap is concentrated in one package — `internal/app` at 49.4% — which is
+module lifecycle: twenty lines of wiring per hook, failing visibly on the first
+start. Everything that carries a rule is above 87%, and `internal/core`,
+`internal/dispatch` and `internal/tracing` are above 95%.
+
+`make mutation` runs [gremlins](https://github.com/go-gremlins/gremlins) over
+`internal/config`, `internal/core` and the circuit breaker — the three places
+where the logic is pure enough for it to say something. Efficacy is 96%, 79% and
+90%. Every mutant that survives is written down in the test file for its package,
+with the reason it is not worth killing; most are equivalent.
 
 ## Requirements
 

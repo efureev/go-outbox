@@ -22,6 +22,25 @@ import (
 // This table came out of mutation testing. Forty of the surviving mutants in
 // this package were a comparison shifted by one, all of them alive because
 // nothing ever presented the boundary value itself.
+//
+// Seven survive `make mutation` now, and none of them should be chased:
+//
+//   - three are the `> 0` halves of a compound rule (MAX_DEFER against
+//     BACKOFF_BASE, LEASE_TTL against PUBLISH_TIMEOUT). They exist only to
+//     suppress a second complaint about a value another rule has already
+//     rejected, so the mutant adds a redundant message to a configuration that
+//     fails either way. Killing it means asserting an exact list of messages,
+//     which is fitting the test to the tool;
+//   - two are os.Hostname(), unkillable without replacing the syscall;
+//   - one is `len(other) <= len(self)` in the driver-prefix search: two distinct
+//     names of equal length cannot be a prefix of one another, so both branches
+//     reach the same answer;
+//   - one is inside LoadAdmin's own error path, which needs an unreadable file
+//     the test already covers from the other direction.
+//
+// Gremlins also reports four false negatives here: three are arithmetic inside
+// const declarations, which lie in no coverage block, and one is a condition in
+// a `case` clause whose block starts after it.
 
 type boundaryRule struct {
 	name string
