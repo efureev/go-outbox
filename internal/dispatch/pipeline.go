@@ -24,7 +24,7 @@ import (
 type Store interface {
 	Claim(ctx context.Context, stream string, limit int, lease core.Lease) ([]core.Message, error)
 	Ack(ctx context.Context, ids []string, token string) (store.AckResult, error)
-	Nack(ctx context.Context, outcomes []core.Outcome, token string, maxAttempts int) (store.NackResult, error)
+	Nack(ctx context.Context, outcomes []core.Outcome, token string, limits core.RetryLimits) (store.NackResult, error)
 	ReleaseLease(ctx context.Context, ids []string, token string) (int, error)
 }
 
@@ -215,18 +215,32 @@ func (p *Pipeline) writeBack(
 	}
 
 	if len(nacked) > 0 {
-		res, err := p.store.Nack(writeCtx, nacked, token, p.cfg.MaxAttempts)
+		res, err := p.store.Nack(writeCtx, nacked, token, core.RetryLimits{
+			MaxAttempts: p.cfg.MaxAttempts,
+			MaxDefer:    p.cfg.MaxDefer,
+		})
 		if err != nil {
 			errs = append(errs, err)
 		} else {
 			ev.Conflicts += res.Conflicts
 			for _, o := range res.Outcomes {
 				if o.Status == core.StatusFailed {
+					// Why it ended here comes from what was sent, not from the
+					// row: a message failed for outrunning MaxDefer is stored
+					// with its marker already cleared, so the row can no longer
+					// say that an outage is what finished it.
+					sent := outcomeFor(o.ID, nacked)
 					ev.Failed = append(ev.Failed, events.Terminal{
 						ID:        o.ID,
 						Attempts:  o.Attempts,
-						Permanent: permanentFor(o.ID, nacked),
+						Permanent: sent.Permanent,
+						Deferred:  sent.Deferred && !sent.Permanent,
 					})
+
+					continue
+				}
+				if o.Deferred {
+					ev.Deferred = append(ev.Deferred, o.ID)
 
 					continue
 				}
@@ -290,8 +304,13 @@ func split(messages []core.Message, publishes []events.Publish, backoff core.Bac
 			ID:        msg.ID,
 			Err:       pub.Err,
 			Permanent: pub.Permanent,
+			Deferred:  pub.Deferred,
 			// Attempts is the count before this failure, so the delay is for
-			// the attempt about to be scheduled.
+			// the attempt about to be scheduled. A deferred message does not
+			// advance that counter, so its delay stays where it is: an outage
+			// is retried at a steady interval rather than backed away from,
+			// which is what makes recovery predictable instead of exponentially
+			// late.
 			Delay: backoff.Next(msg.Attempts + 1),
 		})
 	}
@@ -299,12 +318,14 @@ func split(messages []core.Message, publishes []events.Publish, backoff core.Bac
 	return acked, nacked
 }
 
-func permanentFor(id string, outcomes []core.Outcome) bool {
+// outcomeFor finds what was sent for id, so the reason a message ended up in
+// failed can be read from the classification rather than guessed from the row.
+func outcomeFor(id string, outcomes []core.Outcome) core.Outcome {
 	for _, o := range outcomes {
 		if o.ID == id {
-			return o.Permanent
+			return o
 		}
 	}
 
-	return false
+	return core.Outcome{ID: id}
 }

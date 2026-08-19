@@ -157,6 +157,7 @@ func (j *Janitor) SampleStats(ctx context.Context) {
 		Processing:    st.Processing,
 		Failed:        st.Failed,
 		OldestPending: st.OldestPending,
+		Deferred:      st.Deferred,
 	})
 }
 

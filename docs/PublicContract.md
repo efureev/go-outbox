@@ -75,11 +75,12 @@ Readable for observability, never writable.
 | Column | Meaning |
 |---|---|
 | `status` | `0` pending, `1` processing, `2` sent, `3` failed. |
-| `attempts` | Publish attempts made. |
+| `attempts` | Times a broker rejected the message. Not advanced when the broker could not be reached. |
 | `lease_token`, `lease_until`, `owner` | The current claim: which replica holds the row and until when. |
 | `last_error` | Why the last attempt failed. |
 | `created_at` | Set by the database. |
 | `dispatched_at` | When the broker accepted it. |
+| `deferred_since` | When the message was first held back by an unreachable broker. `NULL` unless something is waiting on a broker to come back. |
 
 Two invariants are enforced by the schema rather than by convention: a row is
 leased exactly while it is processing, and `attempts` is never negative.
@@ -132,6 +133,13 @@ the message: a publisher confirmation on AMQP, `acks=all` on Kafka by default.
 **Permanent failures skip the retry budget.** An unroutable message, an unknown
 stream, a payload above the broker's limit or a rejected credential fails at
 once rather than spending five attempts and an hour of backoff rediscovering it.
+
+**The retry budget counts rejections, not minutes.** A broker that cannot be
+reached never saw the message, so the message is not charged for it: the row
+returns to `pending` with its attempt counter untouched and is retried until the
+broker comes back. An outage does not consume the budget and does not end in
+`failed` — unless `OUTBOX_DISPATCH_MAX_DEFER` is set, which bounds how long a
+message may wait this way.
 
 ## 4. What is not guaranteed
 

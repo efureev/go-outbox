@@ -42,6 +42,57 @@ func IsPermanent(err error) bool {
 	return errors.As(err, &pe)
 }
 
+// UnavailableError marks a failure to reach the broker at all: no live
+// connection, a channel closed underneath the publish, a confirmation that
+// never arrived because the socket had gone. The broker never saw the message,
+// so it never refused it — and charging the message an attempt for that spends
+// its budget on somebody else's outage. At the default backoff the whole budget
+// is gone in fifteen minutes, so a twenty-minute restart leaves a table full of
+// failed rows that only ever needed to wait.
+//
+// A message failing this way returns to pending on the ordinary backoff with
+// its attempt counter untouched, and is marked deferred until it either goes
+// through or exceeds DispatchConfig.MaxDefer. What raises the alarm is the age
+// of the backlog and outbox_messages_deferred_total, which is the pair an
+// operator should be woken by in any case.
+//
+// The classification has to be conservative in one specific direction: a
+// per-message problem mistaken for an outage never advances its counter and so
+// never reaches failed. When a driver cannot tell the two apart, the retryable
+// answer is the safe one.
+type UnavailableError struct {
+	Reason string
+	Err    error
+}
+
+func (e *UnavailableError) Error() string {
+	if e.Err == nil {
+		return "unavailable: " + e.Reason
+	}
+
+	return fmt.Sprintf("unavailable (%s): %v", e.Reason, e.Err)
+}
+
+func (e *UnavailableError) Unwrap() error { return e.Err }
+
+// Unavailable wraps err as a failure to reach the broker.
+func Unavailable(reason string, err error) error {
+	return &UnavailableError{Reason: reason, Err: err}
+}
+
+// IsUnavailable reports whether err — or anything it wraps — is a failure to
+// reach the broker.
+//
+// A permanent error wins over this one: a payload the broker would reject
+// stays permanent even if the connection also happened to drop, because the
+// next attempt would reach the same conclusion. Callers classify permanence
+// first for that reason.
+func IsUnavailable(err error) bool {
+	var ue *UnavailableError
+
+	return errors.As(err, &ue)
+}
+
 // Sentinel errors for conditions the dispatcher and store distinguish.
 var (
 	// ErrUnknownStream is returned when a message names a stream that is not

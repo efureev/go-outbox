@@ -38,9 +38,13 @@ type versionInfo struct {
 // messageCounts deliberately omits delivered rows: counting them means scanning
 // them, and the count is already available as outbox_messages_dispatched_total.
 type messageCounts struct {
-	Pending           int64   `json:"pending"`
-	Processing        int64   `json:"processing"`
-	Failed            int64   `json:"failed"`
+	Pending    int64 `json:"pending"`
+	Processing int64 `json:"processing"`
+	Failed     int64 `json:"failed"`
+	// Deferred counts rows waiting on a broker that could not be reached. It
+	// overlaps pending and processing rather than adding to them, and it is the
+	// field that says whether a backlog is moving slowly or not at all.
+	Deferred          int64   `json:"deferred"`
 	OldestPendingSecs float64 `json:"oldest_pending_seconds"`
 }
 
@@ -70,7 +74,11 @@ type dispatchSettings struct {
 	PollInterval string `json:"poll_interval"`
 	LeaseTTL     string `json:"lease_ttl"`
 	MaxAttempts  int    `json:"max_attempts"`
-	NotifyMode   string `json:"notify_mode"`
+	// MaxDefer is how long an unreachable broker may hold a message back before
+	// it fails anyway. Reported as "unbounded" when it is off, because a "0s"
+	// here reads as "fails immediately", which is its opposite.
+	MaxDefer   string `json:"max_defer"`
+	NotifyMode string `json:"notify_mode"`
 }
 
 func (m *httpModule) handleStats(w http.ResponseWriter, r *http.Request) {
@@ -95,6 +103,7 @@ func (m *httpModule) handleStats(w http.ResponseWriter, r *http.Request) {
 			Pending:           stats.Pending,
 			Processing:        stats.Processing,
 			Failed:            stats.Failed,
+			Deferred:          stats.Deferred,
 			OldestPendingSecs: stats.OldestPending.Seconds(),
 		},
 		Streams:  streamsOf(m.cfg.Brokers),
@@ -305,12 +314,18 @@ func settingsOf(cfg config.Config) dispatchSettings {
 		notify = "listen/notify with polling as reconciliation"
 	}
 
+	maxDefer := "unbounded"
+	if cfg.Dispatch.MaxDefer > 0 {
+		maxDefer = cfg.Dispatch.MaxDefer.String()
+	}
+
 	return dispatchSettings{
 		BatchSize:    cfg.Dispatch.BatchSize,
 		Workers:      cfg.Dispatch.Workers,
 		PollInterval: cfg.Dispatch.PollInterval.String(),
 		LeaseTTL:     cfg.Dispatch.LeaseTTL.String(),
 		MaxAttempts:  cfg.Dispatch.MaxAttempts,
+		MaxDefer:     maxDefer,
 		NotifyMode:   notify,
 	}
 }

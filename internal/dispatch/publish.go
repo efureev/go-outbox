@@ -57,11 +57,17 @@ func (p *Pipeline) publish(ctx context.Context, msgs []core.Message) (results []
 
 			for i := range msgs[c.start:c.end] {
 				err := errs[i]
+				// Permanence is decided first: a payload the broker would
+				// reject stays permanent even when the connection also
+				// dropped, because the next attempt reaches the same answer.
+				permanent := err != nil && core.IsPermanent(err)
+
 				results[c.start+i] = events.Publish{
 					ID:        msgs[c.start+i].ID,
 					Duration:  elapsed,
 					Err:       err,
-					Permanent: err != nil && core.IsPermanent(err),
+					Permanent: permanent,
+					Deferred:  err != nil && !permanent && core.IsUnavailable(err),
 				}
 			}
 		}(c)

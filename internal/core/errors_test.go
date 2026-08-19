@@ -3,6 +3,7 @@ package core
 import (
 	"errors"
 	"fmt"
+	"io"
 	"testing"
 )
 
@@ -47,5 +48,56 @@ func TestStatusString(t *testing.T) {
 		if got := status.String(); got != want {
 			t.Errorf("Status(%d).String() = %q, want %q", status, got, want)
 		}
+	}
+}
+
+func TestUnavailableSurvivesWrapping(t *testing.T) {
+	err := fmt.Errorf("publishing batch: %w", Unavailable("rabbitmq unreachable", io.ErrUnexpectedEOF))
+
+	if !IsUnavailable(err) {
+		t.Error("a wrapped unavailable error is no longer recognised, so the message would be charged an attempt")
+	}
+	if !errors.Is(err, io.ErrUnexpectedEOF) {
+		t.Error("the cause is not reachable through the wrapper")
+	}
+}
+
+// The two classifications answer different questions and must not be confused:
+// permanence decides whether to retry at all, unavailability whether the
+// attempt counts. An ordinary error is neither.
+func TestClassificationsAreIndependent(t *testing.T) {
+	cases := map[string]struct {
+		err                  error
+		permanent, unavailab bool
+	}{
+		"plain":       {errors.New("broker nacked"), false, false},
+		"permanent":   {Permanent("unroutable", nil), true, false},
+		"unavailable": {Unavailable("no connection", nil), false, true},
+	}
+
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			if got := IsPermanent(tc.err); got != tc.permanent {
+				t.Errorf("IsPermanent = %v, want %v", got, tc.permanent)
+			}
+			if got := IsUnavailable(tc.err); got != tc.unavailab {
+				t.Errorf("IsUnavailable = %v, want %v", got, tc.unavailab)
+			}
+		})
+	}
+}
+
+// A message the broker would reject is failed whether or not the connection
+// also dropped — retrying reaches the same verdict, and deferring it forever
+// would mean it never reaches failed at all. The dispatcher reads permanence
+// first for that reason, and this records the intent.
+func TestPermanenceOutranksUnavailability(t *testing.T) {
+	err := Permanent("payload too large", Unavailable("connection lost", nil))
+
+	if !IsPermanent(err) {
+		t.Fatal("permanence was lost")
+	}
+	if !IsUnavailable(err) {
+		t.Fatal("this test would be meaningless if the inner classification were not also present")
 	}
 }

@@ -51,7 +51,8 @@ One line is emitted once the whole graph is up, recording the configuration the 
 
 ```
 15:04:05.128 INF [outbox] ready instance=outbox-7d9f version=1.0.0 streams=global:kfk,local:rmq
-    batch_size=200 workers=8 poll_interval=5s lease_ttl=2m max_attempts=5 notify=true retention=168h
+    batch_size=200 workers=8 poll_interval=5s lease_ttl=2m max_attempts=5 max_defer=unbounded
+    notify=true retention=168h
 ```
 
 `GET /api/v1/stats` answers the same question for a process that is still running. This answers it for one that has
@@ -204,7 +205,8 @@ so `PREFIX=prod`, topic `user.created` and `target.version = 2` give
 | `OUTBOX_DISPATCH_WORKERS`            | `8`          | Publish concurrency per stream.                                                                                                                                                        |
 | `OUTBOX_DISPATCH_POLL_INTERVAL`      | `5s`         | How often to look for work when nothing wakes the pipeline. With notifications on this is reconciliation, not the main path.                                                           |
 | `OUTBOX_DISPATCH_LEASE_TTL`          | `2m`         | How long a claim stays valid. Must exceed `PUBLISH_TIMEOUT`; if it expires mid-flight the batch is reclaimed and published twice, which is what `outbox_lease_conflicts_total` counts. |
-| `OUTBOX_DISPATCH_MAX_ATTEMPTS`       | `5`          | Total publish attempts before a message is failed.                                                                                                                                     |
+| `OUTBOX_DISPATCH_MAX_ATTEMPTS`       | `5`          | How many times a broker may **reject** a message before it is failed. Being unreachable is not a rejection and costs nothing here.                                                     |
+| `OUTBOX_DISPATCH_MAX_DEFER`          | `0`          | How long an unreachable broker may hold a message back before it fails anyway, measured from the first deferral. `0` means unbounded, which is the right answer for most streams.      |
 | `OUTBOX_DISPATCH_BACKOFF_BASE`       | `1m`         | First retry delay. Doubles per attempt.                                                                                                                                                |
 | `OUTBOX_DISPATCH_BACKOFF_MAX`        | `1h`         | Ceiling. Without one, doubling a minute passes a day by the eleventh attempt.                                                                                                          |
 | `OUTBOX_DISPATCH_BACKOFF_JITTER`     | `0.2`        | Fraction to spread the delay by. Without it, everything that failed while a broker was down becomes due at the same instant when it returns.                                           |

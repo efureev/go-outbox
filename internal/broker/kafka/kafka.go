@@ -12,7 +12,9 @@ import (
 	"crypto/x509"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
+	"net"
 	"strings"
 	"time"
 
@@ -97,17 +99,22 @@ func (p *Publisher) Publish(ctx context.Context, msgs []core.Message) []error {
 
 	// A positional error slice means one bad message does not condemn the rest
 	// of the batch to a pointless retry.
+	// Whether the caller is still running is what tells our own write deadline
+	// apart from a shutdown, and it has to be read here rather than inside the
+	// classifier, which sees only the error.
+	parentLive := ctx.Err() == nil
+
 	var partial kafka.WriteErrors
 	if errors.As(err, &partial) && len(partial) == len(msgs) {
 		for i, e := range partial {
-			results[i] = classify(e)
+			results[i] = classify(e, parentLive)
 		}
 
 		return results
 	}
 
 	// Anything else applies to the batch as a whole.
-	shared := classify(err)
+	shared := classify(err, parentLive)
 	for i := range results {
 		results[i] = shared
 	}
@@ -132,13 +139,25 @@ func headers(msg core.Message) []kafka.Header {
 	return out
 }
 
-// classify decides whether retrying can help.
+// classify decides how a write failure should be treated.
 //
-// Kafka's protocol errors say so themselves, and the ones that do not retry
-// cleanly — a topic that does not exist, a payload above the broker's limit, a
-// rejected credential — burn the entire retry budget to reach a conclusion
-// available on the first attempt.
-func classify(err error) error {
+// Three answers, because a broker has three ways to disappoint. It can reject
+// the message — a topic that does not exist, a payload above the limit, a
+// rejected credential — and retrying reaches the same conclusion five backoffs
+// later. It can be unreachable, which says nothing about the message at all and
+// so must not spend an attempt on it. Or it can be temporarily unhappy in a way
+// the protocol itself calls retryable.
+//
+// parentLive separates our own write deadline from the caller's cancellation. A
+// deadline that fires while the caller is still running means nothing answered
+// in time, which is an outage; the same error during a shutdown means the
+// process is stopping and the message was never really attempted.
+//
+// The kafka.Error check has to come before the net.Error one: kafka.Error
+// carries Timeout and Temporary methods, which is exactly the shape of
+// net.Error, so a protocol error would otherwise be read as a network failure
+// and every rejection would defer instead of counting.
+func classify(err error, parentLive bool) error {
 	if err == nil {
 		return nil
 	}
@@ -160,12 +179,51 @@ func classify(err error) error {
 			// topic, and auto-creation is off by default precisely so a typo
 			// does not quietly mint one.
 			return core.Permanent("unknown topic", err)
+		case kafka.LeaderNotAvailable,
+			kafka.NotLeaderForPartition,
+			kafka.BrokerNotAvailable,
+			kafka.ReplicaNotAvailable,
+			kafka.ListenerNotFound,
+			kafka.NetworkException,
+			kafka.RequestTimedOut,
+			kafka.KafkaStorageError,
+			kafka.NotEnoughReplicas,
+			kafka.NotEnoughReplicasAfterAppend:
+			// The cluster answered, and what it said was that it cannot take
+			// the write — no leader, not enough replicas, a broker missing.
+			// None of that is a verdict on this message.
+			return core.Unavailable(kerr.Title(), err)
 		default:
 			// Every other protocol error is classified by the protocol itself.
 			if !kerr.Temporary() {
 				return core.Permanent(kerr.Title(), err)
 			}
+
+			return err
 		}
+	}
+
+	// Below here nothing spoke Kafka back, so nothing judged the message.
+	//
+	// Context errors are settled before the network case rather than after it:
+	// context.DeadlineExceeded reports Timeout and Temporary as well, so it
+	// satisfies net.Error, and a shutdown would otherwise be recorded as an
+	// outage — deferring every message in flight instead of retrying it.
+	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+		if parentLive && errors.Is(err, context.DeadlineExceeded) {
+			return core.Unavailable("write timed out", err)
+		}
+
+		return err
+	}
+
+	var nerr net.Error
+	if errors.As(err, &nerr) {
+		return core.Unavailable("network", err)
+	}
+
+	if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
+		return core.Unavailable("connection lost", err)
 	}
 
 	return err

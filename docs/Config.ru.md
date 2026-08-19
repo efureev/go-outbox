@@ -51,7 +51,8 @@
 
 ```
 15:04:05.128 INF [outbox] ready instance=outbox-7d9f version=1.0.0 streams=global:kfk,local:rmq
-    batch_size=200 workers=8 poll_interval=5s lease_ttl=2m max_attempts=5 notify=true retention=168h
+    batch_size=200 workers=8 poll_interval=5s lease_ttl=2m max_attempts=5 max_defer=unbounded
+    notify=true retention=168h
 ```
 
 `GET /api/v1/stats` отвечает на тот же вопрос про работающий процесс. Эта строка отвечает на него про уже заменённый — а
@@ -205,7 +206,8 @@ OUTBOX_DRIVER_RMQ_LOCAL_PREFIX=loc
 | `OUTBOX_DISPATCH_WORKERS`            | `8`          | Параллелизм публикации на стрим.                                                                                                                                               |
 | `OUTBOX_DISPATCH_POLL_INTERVAL`      | `5s`         | Как часто искать работу, когда пайплайн никто не будит. При включённых уведомлениях это сверка, а не основной путь.                                                            |
 | `OUTBOX_DISPATCH_LEASE_TTL`          | `2m`         | Срок жизни захвата. Должен превышать `PUBLISH_TIMEOUT`; если lease истечёт в процессе, батч перезахватят и опубликуют повторно — это и считает `outbox_lease_conflicts_total`. |
-| `OUTBOX_DISPATCH_MAX_ATTEMPTS`       | `5`          | Всего попыток публикации до перевода в `failed`.                                                                                                                               |
+| `OUTBOX_DISPATCH_MAX_ATTEMPTS`       | `5`          | Сколько раз брокер может **отвергнуть** сообщение до перевода в `failed`. Недоступность отказом не считается и ничего здесь не стоит.                                          |
+| `OUTBOX_DISPATCH_MAX_DEFER`          | `0`          | Сколько недоступный брокер может удерживать сообщение, прежде чем оно всё же упадёт; отсчёт от первого откладывания. `0` — без ограничения, и для большинства стримов это верно. |
 | `OUTBOX_DISPATCH_BACKOFF_BASE`       | `1m`         | Первая задержка повтора. Удваивается с каждой попыткой.                                                                                                                        |
 | `OUTBOX_DISPATCH_BACKOFF_MAX`        | `1h`         | Потолок. Без него удвоение минуты переваливает за сутки к одиннадцатой попытке.                                                                                                |
 | `OUTBOX_DISPATCH_BACKOFF_JITTER`     | `0.2`        | Доля разброса задержки. Без него всё, что упало во время недоступности брокера, становится доступным в один и тот же момент после его возвращения.                             |

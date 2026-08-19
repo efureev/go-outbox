@@ -72,6 +72,9 @@ type row struct {
 	LastError   *string
 	AvailableAt time.Time
 	Dispatched  *time.Time
+	// DeferredSince is nil unless the row is waiting on a broker that could not
+	// be reached.
+	DeferredSince *time.Time
 }
 
 func (f *fixture) row(t testing.TB, id string) row {
@@ -79,9 +82,11 @@ func (f *fixture) row(t testing.TB, id string) row {
 
 	var r row
 	err := f.Pool.QueryRow(t.Context(), fmt.Sprintf(
-		`SELECT status, attempts, lease_token, owner, last_error, available_at, dispatched_at
+		`SELECT status, attempts, lease_token, owner, last_error, available_at, dispatched_at,
+		        deferred_since
 		   FROM %q.messages WHERE id = $1`, f.Schema), id).
-		Scan(&r.Status, &r.Attempts, &r.LeaseToken, &r.Owner, &r.LastError, &r.AvailableAt, &r.Dispatched)
+		Scan(&r.Status, &r.Attempts, &r.LeaseToken, &r.Owner, &r.LastError, &r.AvailableAt,
+			&r.Dispatched, &r.DeferredSince)
 	if err != nil {
 		t.Fatalf("read row %s: %v", id, err)
 	}

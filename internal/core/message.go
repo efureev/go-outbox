@@ -96,8 +96,35 @@ type Outcome struct {
 	// Permanent marks a failure that retrying cannot fix, so the message goes
 	// straight to StatusFailed instead of burning the attempt budget.
 	Permanent bool
+	// Deferred marks a failure to reach the broker at all. The message returns
+	// to StatusPending without advancing its attempt counter: it was never
+	// offered to the broker, so it should not be charged for the outage. See
+	// UnavailableError.
+	//
+	// Permanent takes precedence — a message the broker would reject is failed
+	// whether or not the connection also dropped.
+	Deferred bool
 	// Delay is how long to wait before the next attempt. Computed in Go rather
 	// than in SQL so the backoff policy — including its jitter — stays
 	// testable.
 	Delay time.Duration
+}
+
+// RetryLimits bounds how long the dispatcher keeps trying, along the two axes
+// that fail for different reasons.
+type RetryLimits struct {
+	// MaxAttempts is how many times a broker may reject a message before it is
+	// given up on.
+	MaxAttempts int
+	// MaxDefer bounds how long an unreachable broker may hold a message back
+	// before it fails anyway, measured from the first deferral rather than from
+	// the row's creation — an old message meeting its first outage has waited
+	// no time at all.
+	//
+	// Zero means unbounded: the message waits for as long as the broker is
+	// down, and the backlog age is what raises the alarm. That is the default,
+	// because a message failed by a timeout is worth less than one that is
+	// merely late, and because failing it makes an outage into an operator's
+	// problem twice.
+	MaxDefer time.Duration
 }

@@ -62,7 +62,8 @@ func (m *Metrics) onIteration(_ context.Context, ev events.Iteration) error {
 		if pub.Err != nil {
 			result = ResultError
 
-			m.BrokerErrors.WithLabelValues(stream, driver, "publish", ErrorKind(pub.Permanent)).Inc()
+			m.BrokerErrors.WithLabelValues(stream, driver, "publish",
+				ErrorKind(pub.Permanent, pub.Deferred)).Inc()
 		}
 		m.PublishDuration.WithLabelValues(stream, driver, result).Observe(pub.Duration.Seconds())
 	}
@@ -76,10 +77,21 @@ func (m *Metrics) onIteration(_ context.Context, ev events.Iteration) error {
 		m.MessagesRetried.WithLabelValues(stream, driver).Add(float64(n))
 	}
 
+	// Deferrals are counted apart from retries on purpose. Both put a message
+	// back, but one is the dispatcher working through a rejection and the other
+	// is it waiting for a broker, and an alert that cannot tell them apart
+	// fires on the wrong one.
+	if n := len(ev.Deferred); n > 0 {
+		m.MessagesDeferred.WithLabelValues(stream, driver).Add(float64(n))
+	}
+
 	for _, f := range ev.Failed {
 		reason := ReasonExhausted
-		if f.Permanent {
+		switch {
+		case f.Permanent:
 			reason = ReasonPermanent
+		case f.Deferred:
+			reason = ReasonUnreachable
 		}
 		m.MessagesFailed.WithLabelValues(stream, driver, reason).Inc()
 	}
@@ -101,7 +113,13 @@ func (m *Metrics) onReclaimed(_ context.Context, ev events.Reclaimed) error {
 }
 
 func (m *Metrics) onStats(_ context.Context, ev events.Stats) error {
-	m.ObserveStatusCounts(ev.Pending, ev.Processing, ev.Failed, ev.OldestPending)
+	m.ObserveStatusCounts(StatusCounts{
+		Pending:       ev.Pending,
+		Processing:    ev.Processing,
+		Failed:        ev.Failed,
+		Deferred:      ev.Deferred,
+		OldestPending: ev.OldestPending,
+	})
 
 	return nil
 }

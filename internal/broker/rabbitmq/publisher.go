@@ -48,7 +48,7 @@ func (p *Publisher) Publish(ctx context.Context, msgs []core.Message) []error {
 func (p *Publisher) publishOne(ctx context.Context, msg core.Message) error {
 	ch, conn, err := p.conn.acquire(ctx)
 	if err != nil {
-		return err
+		return p.classify(err)
 	}
 	defer conn.release(ch)
 
@@ -56,7 +56,7 @@ func (p *Publisher) publishOne(ctx context.Context, msg core.Message) error {
 
 	if p.cfg.Declare && dest.Exchange == "" {
 		if err := p.declare(ch, dest.RoutingKey); err != nil {
-			return err
+			return p.classify(err)
 		}
 	}
 
@@ -81,12 +81,15 @@ func (p *Publisher) publishOne(ctx context.Context, msg core.Message) error {
 		// which failures are recoverable in place.
 		p.conn.requestRedial()
 
-		return fmt.Errorf("rabbitmq: publish %s: %w", msg.ID, err)
+		return p.classify(fmt.Errorf("rabbitmq: publish %s: %w", msg.ID, err))
 	}
 
 	ack, err := confirmation.WaitContext(publishCtx)
 	if err != nil {
-		return fmt.Errorf("rabbitmq: awaiting confirmation for %s: %w", msg.ID, err)
+		// The confirmation that never comes is what a broker disappearing
+		// mid-publish looks like from here: the write succeeded into a socket
+		// that had already gone, and what expires is this deadline.
+		return p.classify(fmt.Errorf("rabbitmq: awaiting confirmation for %s: %w", msg.ID, err))
 	}
 
 	// The broker sends basic.return before basic.ack, so by the time the

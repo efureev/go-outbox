@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/efureev/appmod/v4"
 
@@ -57,6 +58,7 @@ func (m *readyModule) announce(context.Context, appmod.HookModule) error {
 		slog.Duration("poll_interval", d.PollInterval),
 		slog.Duration("lease_ttl", d.LeaseTTL),
 		slog.Int("max_attempts", d.MaxAttempts),
+		slog.String("max_defer", deferWindow(d.MaxDefer)),
 		slog.Bool("notify", d.NotifyEnabled),
 		slog.Duration("retention", m.cfg.Janitor.Retention),
 	)
@@ -75,4 +77,14 @@ func streamSummary(brokers config.BrokerConfig) string {
 	sort.Strings(pairs)
 
 	return strings.Join(pairs, ",")
+}
+
+// deferWindow renders the deferral bound the way an operator reads it. A bare
+// "0s" says "fails at once", which is the opposite of what zero means here.
+func deferWindow(d time.Duration) string {
+	if d <= 0 {
+		return "unbounded"
+	}
+
+	return d.String()
 }

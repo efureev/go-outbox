@@ -6,6 +6,65 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **An unreachable broker no longer spends a message's retry budget.** Every failure used to
+  advance the attempt counter, which conflated two events deserving opposite responses. A broker
+  that looks at a message and refuses it should exhaust a budget — retrying will not change its
+  mind. A broker that cannot be reached never saw the message, and charging it for that outage
+  spent the budget on somebody else's problem: at the default backoff the whole budget is gone in
+  fifteen minutes, so a twenty-minute restart left a table full of `failed` rows that only ever
+  needed to wait, and an operator requeueing them by hand.
+
+  Failures to reach a broker are now classified separately. Such a message returns to `pending`
+  with its attempt counter untouched, marked with a new `deferred_since` column, and is retried on
+  the ordinary backoff until the broker comes back — however long that takes. The attempt counter
+  measures rejections, not minutes.
+
+  The classification is deliberately conservative: a per-message problem mistaken for an outage
+  would never advance its counter and so never reach `failed`, so anything not positively
+  identified as unreachable stays retryable. For RabbitMQ that means the named connection errors
+  plus the case that matters most and looks least like an outage — a confirmation deadline expiring
+  on a connection that is no longer live. For Kafka it means the availability codes the protocol
+  reports (`LeaderNotAvailable`, `NotEnoughReplicas`, and others), network errors, and the write
+  timeout, but only while the caller is still running so a shutdown is not recorded as an outage.
+
+- **`OUTBOX_DISPATCH_MAX_DEFER`** bounds how long an unreachable broker may hold a message back
+  before it fails anyway, measured from the first deferral rather than from the row's creation — an
+  old message meeting its first outage has waited none of it. The default is `0`, meaning
+  unbounded, because a message delivered late is worth more than one failed by a timeout. A message
+  failed this way is reported as `reason="unreachable"` rather than `attempts_exhausted`: it was
+  never rejected, and its attempt counter still reads zero.
+
+- **Two metrics for the condition.** `outbox_messages_deferred_total{stream,driver}` counts
+  messages put back without spending an attempt, and the `outbox_messages_deferred` gauge is how
+  many are waiting right now. Together with `outbox_oldest_pending_age_seconds` they separate a
+  backlog that is moving slowly from one that is not moving at all. `outbox_broker_errors_total`
+  gains a `kind="unavailable"` label, and a starting `OutboxBrokerUnreachable` alert ships in
+  [docs/MetricsAndAlerts.md](docs/MetricsAndAlerts.md).
+
+### Changed
+
+- `attempts` now counts times a broker rejected a message, not publish attempts made. A message
+  that waited out an hour-long outage and then went through records zero attempts.
+- `GET /api/v1/stats` reports `messages.deferred` and `settings.max_defer`, and the `ready` line at
+  startup carries `max_defer`.
+- The `outbox_publish_errors` alert expression filters `kind="retryable"`, which no longer matches
+  an outage; `OutboxBrokerUnreachable` covers that case.
+
+### Removed
+
+- `OUTBOX_HTTP_PPROF_TOKEN`. The field was declared in the configuration and read by nothing —
+  pprof was never registered — so the variable did nothing whether it was set or not. Behaviour is
+  unchanged; the name is simply gone from the configuration surface.
+
+### Database
+
+- Migration `0004_deferral.sql` adds the `deferred_since` column, a partial index over it, and
+  replaces the two `requeue` functions so they clear it along with everything else they reset. It
+  is additive: existing rows read `NULL`, which is what "nothing is waiting on a broker" means.
+
+
 ## [1.0.0] — 2026-08-19
 
 First release.

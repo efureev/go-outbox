@@ -73,3 +73,43 @@ func TestStatsNeverCountsDeliveredRows(t *testing.T) {
 		t.Errorf("the stats query groups over the table instead of using the partial indexes:\n%s", q.stats)
 	}
 }
+
+// The whole point of the deferral path is that an unreachable broker does not
+// advance the attempt counter. A nack query that increments unconditionally
+// still passes every other test here — the messages come back, they are just
+// charged for someone else's outage — so the property is asserted directly.
+func TestNackDoesNotChargeAnAttemptForADeferral(t *testing.T) {
+	q := newQueries(`"outbox"`, `"outbox"."messages"`)
+
+	if !strings.Contains(q.nack, "CASE WHEN input.deferred THEN m.attempts ELSE m.attempts + 1 END") {
+		t.Errorf("the nack query advances the attempt counter for a deferral:\n%s", q.nack)
+	}
+	if !strings.Contains(q.nack, "deferred_since") {
+		t.Errorf("the nack query does not record when a deferral started:\n%s", q.nack)
+	}
+}
+
+// A deferral marker that outlives the wait it describes is worse than none: the
+// next outage inherits a window that has already elapsed and fails the message
+// on its first deferral. Every path that ends the wait has to clear it.
+func TestFinishingAMessageClearsTheDeferralMarker(t *testing.T) {
+	q := newQueries(`"outbox"`, `"outbox"."messages"`)
+
+	if !strings.Contains(q.ack, "deferred_since = NULL") {
+		t.Errorf("a delivered message keeps its deferral marker:\n%s", q.ack)
+	}
+	if !strings.Contains(q.nack, "WHEN plan.terminal OR NOT plan.deferred THEN NULL") {
+		t.Errorf("the nack query keeps the marker on paths that end the wait:\n%s", q.nack)
+	}
+}
+
+// The gauge that says how much is stuck behind an unreachable broker has to
+// come from the same sample as the rest, or it is read against counts taken at
+// a different moment.
+func TestStatsCountsDeferredRows(t *testing.T) {
+	q := newQueries(`"outbox"`, `"outbox"."messages"`)
+
+	if !strings.Contains(q.stats, "deferred_since IS NOT NULL") {
+		t.Errorf("the stats query does not count deferred rows:\n%s", q.stats)
+	}
+}

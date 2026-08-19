@@ -31,6 +31,9 @@ type Publish struct {
 	Err error
 	// Permanent marks a failure retrying cannot fix.
 	Permanent bool
+	// Deferred marks a failure to reach the broker at all, which costs the
+	// message a delay but not an attempt.
+	Deferred bool
 }
 
 // Delivery is one message the broker accepted, with the lag measured by the
@@ -48,6 +51,12 @@ type Terminal struct {
 	// ran out of attempts. Both end in the same status; only one of them means
 	// the broker was ever the problem.
 	Permanent bool
+	// Deferred marks the third way to end up here: the broker stayed
+	// unreachable for longer than MaxDefer allowed. The message was never
+	// rejected and its attempt counter may well read zero, so reporting it as
+	// exhausted would send whoever reads it looking for a rejection that never
+	// happened.
+	Deferred bool
 }
 
 // Iteration is one complete claim-publish-write-back cycle of one pipeline.
@@ -65,6 +74,10 @@ type Iteration struct {
 	Delivered []Delivery
 	Requeued  []string
 	Failed    []Terminal
+	// Deferred lists messages returned to pending without spending an attempt,
+	// because their broker could not be reached. They are not in Requeued: one
+	// means the dispatcher is retrying, the other that it is waiting.
+	Deferred []string
 
 	// Conflicts counts write-backs rejected because the lease had been
 	// reclaimed by another replica mid-flight. It should be zero; anything else
@@ -90,6 +103,9 @@ type Stats struct {
 	Processing    int64
 	Failed        int64
 	OldestPending time.Duration
+	// Deferred counts rows waiting on an unreachable broker. A subset of the
+	// others rather than a status of its own.
+	Deferred int64
 }
 
 // Retention reports a sweep of delivered rows.

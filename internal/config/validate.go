@@ -114,6 +114,19 @@ func (c Config) validateDispatch(add func(string, ...any)) {
 	if d.MaxAttempts < 1 {
 		add("OUTBOX_DISPATCH_MAX_ATTEMPTS must be at least 1, got %d", d.MaxAttempts)
 	}
+	// A negative window would make every first deferral immediately terminal,
+	// which is the behaviour this option exists to prevent. Zero is the way to
+	// turn it off.
+	if d.MaxDefer < 0 {
+		add("OUTBOX_DISPATCH_MAX_DEFER must not be negative, got %s", d.MaxDefer)
+	}
+	// A window shorter than one backoff step fails a message on its second
+	// deferral whatever the outage looks like, which reads as "unbounded" to
+	// whoever set it and behaves as "one retry".
+	if d.MaxDefer > 0 && d.BackoffBase > 0 && d.MaxDefer < d.BackoffBase {
+		add("OUTBOX_DISPATCH_MAX_DEFER (%s) must not be below OUTBOX_DISPATCH_BACKOFF_BASE (%s), "+
+			"otherwise a deferred message fails before it is retried once", d.MaxDefer, d.BackoffBase)
+	}
 	if d.PollInterval <= 0 {
 		add("OUTBOX_DISPATCH_POLL_INTERVAL must be positive, got %s", d.PollInterval)
 	}

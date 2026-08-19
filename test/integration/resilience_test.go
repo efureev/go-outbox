@@ -194,17 +194,24 @@ func (r *resilient) sentIn(t *testing.T, stream string) int {
 	return n
 }
 
-// attemptedWithError counts messages in a stream that have a recorded failure,
-// which is how a test tells a real outage from a lucky race.
-func (r *resilient) attemptedWithError(t *testing.T, stream string) int {
+// feltAFailure counts messages in a stream that have a recorded failure, which
+// is how a test tells a real outage from a lucky race.
+//
+// Two counters can move, and which one does is the point: a broker that rejects
+// a message advances attempts, while one that could not be reached advances
+// nothing and only stamps deferred_since. Asking about attempts alone would
+// mean an outage — the very thing these tests arrange — no longer registers as
+// having happened.
+func (r *resilient) feltAFailure(t *testing.T, stream string) int {
 	t.Helper()
 
 	var n int
 	err := r.Pool.QueryRow(t.Context(), fmt.Sprintf(
 		`SELECT count(*) FROM %q.messages
-		  WHERE stream = $1 AND attempts > 0 AND last_error IS NOT NULL`, r.Schema), stream).Scan(&n)
+		  WHERE stream = $1 AND last_error IS NOT NULL
+		    AND (attempts > 0 OR deferred_since IS NOT NULL)`, r.Schema), stream).Scan(&n)
 	if err != nil {
-		t.Fatalf("count attempted in %s: %v", stream, err)
+		t.Fatalf("count failures in %s: %v", stream, err)
 	}
 
 	return n
@@ -259,11 +266,21 @@ func TestTwoOfThreeBrokersFailAndRecover(t *testing.T) {
 	// The outage has to have actually been felt, or the assertions above pass
 	// for the wrong reason: a test that races past the fault proves nothing.
 	waitFor(t, 30*time.Second, func() bool {
-		return r.attemptedWithError(t, "alpha") > 0
+		return r.feltAFailure(t, "alpha") > 0
 	}, "alpha records a failed publish attempt")
 
-	if r.attemptedWithError(t, "gamma") != 0 {
+	if r.feltAFailure(t, "gamma") != 0 {
 		t.Error("gamma recorded a publish failure; its broker never went down")
+	}
+
+	// And it was felt as an outage rather than as a rejection: alpha's broker
+	// never saw these messages, so none of them may be charged an attempt.
+	if attempts := r.maxAttempts(t); attempts != 0 {
+		t.Errorf("max attempts = %d, want 0: an unreachable broker must not spend the budget",
+			attempts)
+	}
+	if deferred := r.deferredCount(t); deferred == 0 {
+		t.Error("nothing is marked as waiting on a broker, so the outage was recorded as a rejection")
 	}
 
 	// Nothing is lost: the undelivered messages are pending or leased, never gone.
@@ -379,7 +396,47 @@ func TestEverythingFailsAndComesBack(t *testing.T) {
 // An outage longer than the retry budget is a different story, and the one an
 // operator needs to know about: the messages stop being retried and wait for a
 // deliberate requeue.
-func TestOutageBeyondTheRetryBudgetEndsInFailed(t *testing.T) {
+// deferredCount is how many rows are waiting on a broker that could not be
+// reached. It reads the marker rather than a metric, so the assertion is about
+// what was stored.
+func (r *resilient) deferredCount(t *testing.T) int {
+	t.Helper()
+
+	var n int
+	if err := r.Pool.QueryRow(t.Context(), fmt.Sprintf(
+		`SELECT count(*) FROM %q.messages WHERE deferred_since IS NOT NULL`, r.Schema),
+	).Scan(&n); err != nil {
+		t.Fatalf("count deferred: %v", err)
+	}
+
+	return n
+}
+
+// maxAttempts is the highest attempt counter in the table.
+func (r *resilient) maxAttempts(t *testing.T) int {
+	t.Helper()
+
+	var n int
+	if err := r.Pool.QueryRow(t.Context(), fmt.Sprintf(
+		`SELECT coalesce(max(attempts), 0) FROM %q.messages`, r.Schema),
+	).Scan(&n); err != nil {
+		t.Fatalf("max attempts: %v", err)
+	}
+
+	return n
+}
+
+// The behaviour the deferral path exists for.
+//
+// Before it, every failure advanced the attempt counter, so an outage longer
+// than the retry budget moved messages to failed and required an operator to
+// requeue them by hand — although the broker never saw one of them. The budget
+// counts rejections now, and being unreachable is not a rejection.
+//
+// MAX_ATTEMPTS is 2 against a 200ms backoff, so the old behaviour would have
+// exhausted it within a second. The test then waits an order of magnitude
+// longer than that and insists nothing failed.
+func TestOutageBeyondTheRetryBudgetStillDelivers(t *testing.T) {
 	r := newResilient(t, []string{"alpha"}, "OUTBOX_DISPATCH_MAX_ATTEMPTS=2")
 	r.Start(t)
 
@@ -392,8 +449,57 @@ func TestOutageBeyondTheRetryBudgetEndsInFailed(t *testing.T) {
 	}
 
 	waitFor(t, 60*time.Second, func() bool {
+		return r.deferredCount(t) == count
+	}, "the dispatcher recognises the broker is gone and holds the messages back")
+
+	// Long enough for a dozen retry cycles, which under the old rule was six
+	// times the whole budget.
+	time.Sleep(2 * time.Second)
+
+	if failed := r.statusCount(t, core.StatusFailed); failed != 0 {
+		t.Fatalf("%d messages failed during an outage the broker never even saw", failed)
+	}
+	if attempts := r.maxAttempts(t); attempts != 0 {
+		t.Errorf("attempts = %d, want 0: an unreachable broker must not spend the budget", attempts)
+	}
+	if pending := r.statusCount(t, core.StatusPending); pending != count {
+		t.Errorf("pending = %d, want %d", pending, count)
+	}
+
+	// No operator involved: the broker comes back and the backlog drains.
+	r.Brokers["alpha"].Heal()
+
+	waitFor(t, 60*time.Second, func() bool {
+		return r.statusCount(t, core.StatusSent) == count
+	}, "the backlog drains on its own once the broker returns")
+
+	if n := r.deferredCount(t); n != 0 {
+		t.Errorf("%d delivered messages still carry a deferral marker; the next outage would "+
+			"inherit a window that has already elapsed", n)
+	}
+}
+
+// The escape hatch. Unbounded deferral is the default because a late message
+// beats a failed one, but a stream with a deadline of its own can ask for the
+// opposite, and then an outage does end in failed.
+func TestOutageBeyondMaxDeferEndsInFailed(t *testing.T) {
+	r := newResilient(t, []string{"alpha"},
+		"OUTBOX_DISPATCH_MAX_ATTEMPTS=2",
+		"OUTBOX_DISPATCH_MAX_DEFER=1s",
+	)
+	r.Start(t)
+
+	const count = 5
+
+	r.Brokers["alpha"].Break()
+
+	for i := range count {
+		r.insert(t, "alpha", "deadline.bound", fmt.Appendf(nil, `{"n":%d}`, i), nil)
+	}
+
+	waitFor(t, 60*time.Second, func() bool {
 		return r.statusCount(t, core.StatusFailed) == count
-	}, "the attempts are spent and the messages stop being retried")
+	}, "the deferral window runs out and the messages stop waiting")
 
 	// Still nothing lost: they are recorded, with the reason.
 	var lastError string
@@ -404,6 +510,16 @@ func TestOutageBeyondTheRetryBudgetEndsInFailed(t *testing.T) {
 	}
 	if lastError == "" {
 		t.Error("a failed message carries no reason; the outage must be recorded")
+	}
+	// A message failed this way was never rejected, so its counter reads zero.
+	// That is why the reason is reported as unreachable rather than exhausted:
+	// an attempts figure of zero next to "attempts exhausted" sends whoever
+	// reads it looking for a rejection that never happened.
+	if attempts := r.maxAttempts(t); attempts != 0 {
+		t.Errorf("attempts = %d, want 0", attempts)
+	}
+	if n := r.deferredCount(t); n != 0 {
+		t.Errorf("%d failed messages still carry a deferral marker", n)
 	}
 
 	// The broker returns, and the operator puts them back.
@@ -433,9 +549,6 @@ func TestOutageBeyondTheRetryBudgetEndsInFailed(t *testing.T) {
 	}, "requeued messages are delivered once the broker is back")
 }
 
-// The startup contract, stated as a test because it is the asymmetry that
-// surprises people: a broker that is unreachable while running is contained,
-// but one that is unreachable at startup stops the process.
 func TestUnreachableBrokerFailsTheStart(t *testing.T) {
 	f := newFixture(t)
 

@@ -20,8 +20,9 @@ whatever it likes into the `stream` column.
 |---|---|---|---|
 | `outbox_messages_claimed_total` | counter | stream, driver, attempt | Messages taken into processing. `attempt` is `initial` or `retry`. |
 | `outbox_messages_dispatched_total` | counter | stream, driver | Messages a broker accepted. |
-| `outbox_messages_retried_total` | counter | stream, driver | Messages returned to pending after a retryable failure. |
-| `outbox_messages_failed_total` | counter | stream, driver, reason | Messages that stopped. `reason` is `permanent` or `attempts_exhausted` — only the second means the broker was ever the problem. |
+| `outbox_messages_retried_total` | counter | stream, driver | Messages returned to pending after a broker rejected them. |
+| `outbox_messages_deferred_total` | counter | stream, driver | Messages returned to pending **without spending an attempt**, because the broker could not be reached. Rising while `retried_total` stays flat is the signature of an outage rather than of messages being refused. |
+| `outbox_messages_failed_total` | counter | stream, driver, reason | Messages that stopped. `reason` is `permanent`, `attempts_exhausted`, or `unreachable` — the last means the broker never came back within `MAX_DEFER`, so the attempt counter still reads zero. |
 | `outbox_delivery_lag_seconds` | histogram | stream, driver | Time from a producer writing a message to a broker accepting it. Measured entirely by the database clock, so it does not absorb the difference between this process's clock and the database's. |
 | `outbox_publish_duration_seconds` | histogram | stream, driver, result | Time spent publishing. |
 
@@ -31,6 +32,7 @@ whatever it likes into the `stream` column.
 |---|---|---|---|
 | `outbox_oldest_pending_age_seconds` | gauge | — | How long the oldest undelivered message has waited. The clearest signal that delivery is falling behind: a count says how much is waiting, this says how long. |
 | `outbox_messages_by_status` | gauge | status | Rows in each non-terminal status. Delivered rows are deliberately absent — counting them means scanning them, and `outbox_messages_dispatched_total` already covers it. |
+| `outbox_messages_deferred` | gauge | — | Rows waiting on a broker that could not be reached, right now. A subset of pending and processing, not a status of its own. It is what separates a backlog that is moving slowly from one that is not moving at all. |
 | `outbox_batch_size` | histogram | stream | Messages per claim. Consistently at the configured maximum means the dispatcher is behind. |
 | `outbox_iteration_duration_seconds` | histogram | stream | One claim-publish-write-back cycle. |
 
@@ -110,6 +112,17 @@ groups:
         labels: {severity: warning}
         annotations:
           summary: Sustained publish failures against a broker.
+
+      - alert: OutboxBrokerUnreachable
+        expr: sum by (stream) (rate(outbox_messages_deferred_total[5m])) > 0
+        for: 10m
+        labels: {severity: critical}
+        annotations:
+          summary: A broker has been unreachable for ten minutes and its stream is not moving.
+          description: >
+            The messages are intact and their attempt counters untouched — they
+            will go out on their own when the broker returns. Nothing here needs
+            a requeue. Check outbox_messages_deferred for how many are waiting.
 
       - alert: OutboxReclaimingLeases
         expr: increase(outbox_messages_reclaimed_total[15m]) > 0

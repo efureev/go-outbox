@@ -4,6 +4,7 @@ package integration
 
 import (
 	"errors"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -228,7 +229,7 @@ func TestExpiredLeaseCannotOverwriteAnotherInstancesResult(t *testing.T) {
 		ID:    claimedA[0].ID,
 		Err:   errors.New("broker refused"),
 		Delay: time.Minute,
-	}}, leaseA.Token, 5)
+	}}, leaseA.Token, limits(5))
 	if err != nil {
 		t.Fatalf("nack by A: %v", err)
 	}
@@ -296,7 +297,7 @@ func TestNackRetriesUntilAttemptsAreExhausted(t *testing.T) {
 		// without waiting out a backoff.
 		res, err := f.Store.Nack(t.Context(), []core.Outcome{{
 			ID: claimed[0].ID, Err: errors.New("broker down"), Delay: 0,
-		}}, l.Token, maxAttempts)
+		}}, l.Token, limits(maxAttempts))
 		if err != nil {
 			t.Fatalf("nack on attempt %d: %v", attempt, err)
 		}
@@ -324,7 +325,7 @@ func TestNackAppliesTheGivenDelay(t *testing.T) {
 	before := time.Now()
 	if _, err := f.Store.Nack(t.Context(), []core.Outcome{{
 		ID: claimed[0].ID, Err: errors.New("timeout"), Delay: 90 * time.Second,
-	}}, l.Token, 5); err != nil {
+	}}, l.Token, limits(5)); err != nil {
 		t.Fatalf("nack: %v", err)
 	}
 
@@ -372,7 +373,7 @@ func TestPermanentFailureSkipsTheRetryBudget(t *testing.T) {
 		ID:        claimed[0].ID,
 		Err:       core.Permanent("unroutable", errors.New("no such exchange")),
 		Permanent: true,
-	}}, l.Token, 5)
+	}}, l.Token, limits(5))
 	if err != nil {
 		t.Fatalf("nack: %v", err)
 	}
@@ -406,7 +407,7 @@ func TestRequeueMakesAFailedMessageDeliverableAgain(t *testing.T) {
 	}
 	if _, err := f.Store.Nack(t.Context(), []core.Outcome{{
 		ID: claimed[0].ID, Err: errors.New("gave up"),
-	}}, l.Token, maxAttempts); err != nil {
+	}}, l.Token, limits(maxAttempts)); err != nil {
 		t.Fatalf("nack: %v", err)
 	}
 	if r := f.row(t, claimed[0].ID); r.Status != core.StatusFailed {
@@ -675,3 +676,245 @@ func TestSchemaRejectsALeaselessProcessingRow(t *testing.T) {
 }
 
 func quoted(s string) string { return `"` + s + `"` }
+
+// limits builds the ordinary retry bounds: a rejection budget, and no ceiling
+// on how long an unreachable broker may hold a message back. Zero is the
+// default in production too.
+func limits(maxAttempts int) core.RetryLimits {
+	return core.RetryLimits{MaxAttempts: maxAttempts}
+}
+
+// The rule the whole deferral path exists to enforce. Charging a message an
+// attempt for a broker it never reached spends its budget on somebody else's
+// outage: at the default backoff the whole budget is gone in fifteen minutes,
+// so a longer restart used to leave a table full of failed rows.
+func TestDeferralDoesNotSpendAnAttempt(t *testing.T) {
+	f := newFixture(t)
+	f.seed(t, "local", 1)
+
+	l := lease("a", time.Minute)
+	claimed, err := f.Store.Claim(t.Context(), "local", 10, l)
+	if err != nil {
+		t.Fatalf("claim: %v", err)
+	}
+
+	res, err := f.Store.Nack(t.Context(), []core.Outcome{{
+		ID:       claimed[0].ID,
+		Err:      core.Unavailable("rabbitmq unreachable", errors.New("no connection")),
+		Deferred: true,
+		Delay:    90 * time.Second,
+	}}, l.Token, limits(1))
+	if err != nil {
+		t.Fatalf("nack: %v", err)
+	}
+
+	// MaxAttempts is 1, so an ordinary failure here would be terminal.
+	if len(res.Outcomes) != 1 || res.Outcomes[0].Status != core.StatusPending {
+		t.Fatalf("outcomes = %+v, want a single pending message", res.Outcomes)
+	}
+	if !res.Outcomes[0].Deferred {
+		t.Error("the write-back does not report the message as deferred")
+	}
+
+	r := f.row(t, claimed[0].ID)
+	if r.Attempts != 0 {
+		t.Errorf("attempts = %d, want 0", r.Attempts)
+	}
+	if r.DeferredSince == nil {
+		t.Error("deferred_since was not recorded, so no window can ever run out")
+	}
+	if !r.AvailableAt.After(time.Now().Add(time.Minute)) {
+		t.Errorf("available_at = %s, want the given delay applied", r.AvailableAt)
+	}
+	if r.LastError == nil || *r.LastError == "" {
+		t.Error("the reason for the wait was not recorded")
+	}
+}
+
+// The window bounds a continuous outage, not the lifetime of the row. Restamping
+// it on every deferral would mean it never elapses; taking it from created_at
+// would fail an old message on its first deferral, having waited none of it.
+func TestTheDeferralWindowStartsAtTheFirstDeferral(t *testing.T) {
+	f := newFixture(t)
+	f.seed(t, "local", 1)
+
+	var first time.Time
+	for i := range 2 {
+		l := lease("a", time.Minute)
+		claimed, err := f.Store.Claim(t.Context(), "local", 10, l)
+		if err != nil {
+			t.Fatalf("claim %d: %v", i, err)
+		}
+		if len(claimed) != 1 {
+			t.Fatalf("claim %d returned %d messages, want 1", i, len(claimed))
+		}
+
+		if _, err := f.Store.Nack(t.Context(), []core.Outcome{{
+			ID: claimed[0].ID, Err: errors.New("broker gone"), Deferred: true, Delay: 0,
+		}}, l.Token, limits(5)); err != nil {
+			t.Fatalf("nack %d: %v", i, err)
+		}
+
+		r := f.row(t, claimed[0].ID)
+		if r.DeferredSince == nil {
+			t.Fatalf("deferral %d recorded no marker", i)
+		}
+		if i == 0 {
+			first = *r.DeferredSince
+
+			continue
+		}
+		if !r.DeferredSince.Equal(first) {
+			t.Errorf("the window restarted on the second deferral (%s then %s), so it would never elapse",
+				first, *r.DeferredSince)
+		}
+	}
+}
+
+// With a window configured, a broker that never comes back does eventually end
+// the wait — and the row stops claiming to be deferred once it has.
+func TestDeferralBeyondTheWindowFails(t *testing.T) {
+	f := newFixture(t)
+	f.seed(t, "local", 1)
+
+	l := lease("a", time.Minute)
+	claimed, err := f.Store.Claim(t.Context(), "local", 10, l)
+	if err != nil {
+		t.Fatalf("claim: %v", err)
+	}
+
+	unreachable := core.Outcome{
+		ID: claimed[0].ID, Err: errors.New("broker gone"), Deferred: true, Delay: 0,
+	}
+	bounded := core.RetryLimits{MaxAttempts: 5, MaxDefer: time.Hour}
+
+	if _, err := f.Store.Nack(t.Context(), []core.Outcome{unreachable}, l.Token, bounded); err != nil {
+		t.Fatalf("first nack: %v", err)
+	}
+	// Stand in for an outage that has been running for two hours.
+	if _, err := f.Pool.Exec(t.Context(), fmt.Sprintf(
+		`UPDATE %q.messages SET deferred_since = now() - interval '2 hours' WHERE id = $1`, f.Schema),
+		claimed[0].ID); err != nil {
+		t.Fatalf("age the deferral: %v", err)
+	}
+
+	l2 := lease("a", time.Minute)
+	again, err := f.Store.Claim(t.Context(), "local", 10, l2)
+	if err != nil {
+		t.Fatalf("second claim: %v", err)
+	}
+	unreachable.ID = again[0].ID
+
+	res, err := f.Store.Nack(t.Context(), []core.Outcome{unreachable}, l2.Token, bounded)
+	if err != nil {
+		t.Fatalf("second nack: %v", err)
+	}
+
+	if len(res.Outcomes) != 1 || res.Outcomes[0].Status != core.StatusFailed {
+		t.Fatalf("outcomes = %+v, want a single failed message", res.Outcomes)
+	}
+
+	r := f.row(t, claimed[0].ID)
+	if r.DeferredSince != nil {
+		t.Error("a failed message still claims to be waiting on a broker")
+	}
+	if r.Attempts != 0 {
+		t.Errorf("attempts = %d, want 0: it was never rejected, only never reached", r.Attempts)
+	}
+}
+
+// Every path that ends the wait has to clear the marker. One that outlives the
+// outage it describes is worse than none: the next outage inherits a window
+// that has already elapsed and fails the message on its first deferral.
+func TestEndingTheWaitClearsTheDeferralMarker(t *testing.T) {
+	deferOnce := func(t *testing.T, f *fixture) string {
+		t.Helper()
+
+		l := lease("a", time.Minute)
+		claimed, err := f.Store.Claim(t.Context(), "local", 10, l)
+		if err != nil {
+			t.Fatalf("claim: %v", err)
+		}
+		if _, err := f.Store.Nack(t.Context(), []core.Outcome{{
+			ID: claimed[0].ID, Err: errors.New("broker gone"), Deferred: true, Delay: 0,
+		}}, l.Token, limits(5)); err != nil {
+			t.Fatalf("defer: %v", err)
+		}
+		if f.row(t, claimed[0].ID).DeferredSince == nil {
+			t.Fatal("setup: nothing was deferred, so this proves nothing")
+		}
+
+		return claimed[0].ID
+	}
+
+	t.Run("delivery", func(t *testing.T) {
+		f := newFixture(t)
+		f.seed(t, "local", 1)
+		id := deferOnce(t, f)
+
+		l := lease("a", time.Minute)
+		claimed, err := f.Store.Claim(t.Context(), "local", 10, l)
+		if err != nil {
+			t.Fatalf("claim: %v", err)
+		}
+		if _, err := f.Store.Ack(t.Context(), ids(claimed), l.Token); err != nil {
+			t.Fatalf("ack: %v", err)
+		}
+
+		if f.row(t, id).DeferredSince != nil {
+			t.Error("a delivered message still carries a deferral marker")
+		}
+	})
+
+	t.Run("a reason the broker actually gave", func(t *testing.T) {
+		f := newFixture(t)
+		f.seed(t, "local", 1)
+		id := deferOnce(t, f)
+
+		l := lease("a", time.Minute)
+		claimed, err := f.Store.Claim(t.Context(), "local", 10, l)
+		if err != nil {
+			t.Fatalf("claim: %v", err)
+		}
+		if _, err := f.Store.Nack(t.Context(), []core.Outcome{{
+			ID: claimed[0].ID, Err: errors.New("broker nacked"), Delay: 0,
+		}}, l.Token, limits(5)); err != nil {
+			t.Fatalf("nack: %v", err)
+		}
+
+		r := f.row(t, id)
+		if r.DeferredSince != nil {
+			t.Error("the message is no longer waiting on the broker, yet still says it is")
+		}
+		if r.Attempts != 1 {
+			t.Errorf("attempts = %d, want 1: this failure was a rejection", r.Attempts)
+		}
+	})
+}
+
+// The gauge that separates a backlog which is moving slowly from one that is
+// not moving at all.
+func TestStatsCountsWhatIsWaitingOnABroker(t *testing.T) {
+	f := newFixture(t)
+	f.seed(t, "local", 3)
+
+	l := lease("a", time.Minute)
+	claimed, err := f.Store.Claim(t.Context(), "local", 10, l)
+	if err != nil {
+		t.Fatalf("claim: %v", err)
+	}
+
+	if _, err := f.Store.Nack(t.Context(), []core.Outcome{{
+		ID: claimed[0].ID, Err: errors.New("broker gone"), Deferred: true, Delay: 0,
+	}}, l.Token, limits(5)); err != nil {
+		t.Fatalf("nack: %v", err)
+	}
+
+	st, err := f.Store.Stats(t.Context())
+	if err != nil {
+		t.Fatalf("stats: %v", err)
+	}
+	if st.Deferred != 1 {
+		t.Errorf("Deferred = %d, want 1", st.Deferred)
+	}
+}

@@ -258,16 +258,20 @@ func (c *Conn) Close(context.Context) error {
 
 // HealthCheck reports whether there is a live connection.
 func (c *Conn) HealthCheck(context.Context) error {
-	c.mu.RLock()
-	conn := c.current
-	c.mu.RUnlock()
-
-	if conn == nil {
-		return ErrNotConnected
-	}
-	if conn.conn.IsClosed() {
+	if !c.live() {
 		return ErrNotConnected
 	}
 
 	return nil
+}
+
+// live reports whether a publish could be attempted right now. It is the same
+// question HealthCheck answers, in the form the publisher needs when deciding
+// whether a failure was the broker refusing a message or the broker being gone.
+func (c *Conn) live() bool {
+	c.mu.RLock()
+	conn := c.current
+	c.mu.RUnlock()
+
+	return conn != nil && !conn.conn.IsClosed()
 }

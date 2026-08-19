@@ -45,7 +45,13 @@ application beyond one `INSERT`.
   expires and another picks them up. A clean shutdown does not even wait for that —
   it hands unfinished claims straight back.
 
-- **Tells you what happened.** 17 Prometheus metrics, including the one that actually
+- **An outage costs you latency, not an evening.** The retry budget counts times a
+  broker *refused* a message. A broker that cannot be reached never saw it, so it
+  spends nothing: the message waits and goes out when the broker returns, however long
+  that takes. No table full of `failed` rows to requeue by hand after a twenty-minute
+  restart.
+
+- **Tells you what happened.** 19 Prometheus metrics, including the one that actually
   matters: how long the oldest undelivered message has waited. Failed messages are
   listable and requeueable over HTTP, so nobody writes an `UPDATE` by hand.
 
@@ -58,7 +64,7 @@ application beyond one `INSERT`.
   misspelled driver key, three drivers each missing a DSN — so a misconfigured
   deployment takes one restart to diagnose rather than one per mistake.
 
-- **Proven, not asserted.** 103 tests, half of them against real PostgreSQL, RabbitMQ
+- **Proven, not asserted.** 146 tests, half of them against real PostgreSQL, RabbitMQ
   and Redpanda, because a set of concurrency rules expressed in SQL cannot be checked
   by a mock that matches query text.
 

@@ -77,44 +77,83 @@ RETURNING m.id, m.stream, m.topic, m.payload, m.headers, m.target, m.attempts, m
 // the application and the database into the metric.
 const ackSQL = `
 UPDATE %[1]s
-   SET status        = 2,
-       dispatched_at = now(),
-       lease_token   = NULL,
-       lease_until   = NULL,
-       owner         = NULL,
-       last_error    = NULL
+   SET status         = 2,
+       dispatched_at  = now(),
+       lease_token    = NULL,
+       lease_until    = NULL,
+       owner          = NULL,
+       last_error     = NULL,
+       deferred_since = NULL
  WHERE id = ANY($1)
    AND lease_token = $2
 RETURNING id, stream, extract(epoch FROM (now() - created_at))`
 
-// nackSQL records a failure for a batch, each message with its own error,
-// its own permanent/retryable classification and its own delay.
+// nackSQL records a failure for a batch, each message with its own error, its
+// own classification and its own delay.
 //
 // The delay arrives computed rather than derived in SQL: the backoff policy —
 // exponential, capped, jittered — belongs somewhere it can be unit-tested, and
 // a POWER() expression buried in an UPDATE is not that place.
 //
-// A permanent failure goes straight to failed without spending the remaining
-// attempts on an error that retrying cannot fix.
+// Three outcomes, not two. A permanent failure goes straight to failed without
+// spending the remaining attempts on an error retrying cannot fix. An ordinary
+// failure advances the attempt counter and is failed once it reaches the
+// maximum. A deferred one — the broker could not be reached, so it never saw
+// the message — returns to pending with the counter untouched, because charging
+// a message for somebody else's outage spends its whole budget in fifteen
+// minutes at the default backoff.
+//
+// deferred_since is set on the first deferral and kept across later ones, so
+// $8 bounds a continuous outage rather than the lifetime of the row. Every
+// other path clears it: a message that fails for a reason the broker actually
+// gave has stopped waiting on the broker to come back.
+//
+// The plan CTE exists because the terminal condition is needed three times —
+// for the status, for the availability time and for the marker — and it depends
+// on columns of the row being written. MATERIALIZED keeps it one evaluation
+// rather than three. The lease_token predicate is repeated on the UPDATE
+// itself: the CTE reading the row does not lock it, and ownership is the
+// invariant that makes several replicas safe.
 const nackSQL = `
+WITH input AS (
+    SELECT * FROM unnest($3::uuid[], $4::text[], $5::bool[], $6::bool[], $7::float8[])
+        AS t(id, err, permanent, deferred, delay)
+), plan AS MATERIALIZED (
+    SELECT m.id,
+           input.err,
+           input.delay,
+           input.deferred,
+           CASE WHEN input.deferred THEN m.attempts ELSE m.attempts + 1 END AS attempts,
+           coalesce(m.deferred_since, now())                                AS deferred_since,
+           (
+               input.permanent
+               OR (NOT input.deferred AND m.attempts + 1 >= $2)
+               OR (input.deferred AND $8 > 0
+                   AND coalesce(m.deferred_since, now()) <= now() - make_interval(secs => $8))
+           ) AS terminal
+      FROM %[1]s m
+      JOIN input ON input.id = m.id
+     WHERE m.lease_token = $1
+)
 UPDATE %[1]s m
-   SET attempts    = m.attempts + 1,
-       last_error  = left(v.err, 2000),
-       lease_token = NULL,
-       lease_until = NULL,
-       owner       = NULL,
-       status      = CASE WHEN v.permanent OR m.attempts + 1 >= $2 THEN 3 ELSE 0 END,
-       available_at = CASE
-                          WHEN v.permanent OR m.attempts + 1 >= $2 THEN m.available_at
-                          ELSE now() + make_interval(secs => v.delay)
-                      END
-  FROM (
-        SELECT * FROM unnest($3::uuid[], $4::text[], $5::bool[], $6::float8[])
-            AS t(id, err, permanent, delay)
-       ) v
- WHERE m.id = v.id
+   SET attempts       = plan.attempts,
+       last_error     = left(plan.err, 2000),
+       lease_token    = NULL,
+       lease_until    = NULL,
+       owner          = NULL,
+       deferred_since = CASE
+                            WHEN plan.terminal OR NOT plan.deferred THEN NULL
+                            ELSE plan.deferred_since
+                        END,
+       status         = CASE WHEN plan.terminal THEN 3 ELSE 0 END,
+       available_at   = CASE
+                            WHEN plan.terminal THEN m.available_at
+                            ELSE now() + make_interval(secs => plan.delay)
+                        END
+  FROM plan
+ WHERE m.id = plan.id
    AND m.lease_token = $1
-RETURNING m.id, m.stream, m.status, m.attempts`
+RETURNING m.id, m.stream, m.status, m.attempts, m.deferred_since IS NOT NULL`
 
 // releaseLeaseSQL hands unfinished claims back on a clean shutdown, so another
 // replica picks them up immediately instead of waiting out the lease.
@@ -163,8 +202,10 @@ RETURNING expired.id, expired.stream, coalesce(expired.owner, ''),
 
 // statsSQL samples the gauges.
 //
-// Three scalar sub-queries, each answered by its own partial index, and a
-// min() over the pending-age index that stops at the first entry. Nothing here
+// Four scalar sub-queries, each answered by its own partial index, and a
+// min() over the pending-age index that stops at the first entry. The last of
+// them counts what is currently held back by an unreachable broker, which is
+// the difference between a backlog that is growing and one that is stuck. Nothing here
 // touches a delivered row — those are counted by
 // outbox_messages_dispatched_total. A GROUP BY status across the whole table
 // would be a sequential scan over every delivered row ever written.
@@ -174,7 +215,8 @@ SELECT
     (SELECT count(*) FROM %[1]s WHERE status = 1),
     (SELECT count(*) FROM %[1]s WHERE status = 3),
     (SELECT coalesce(extract(epoch FROM (now() - min(created_at))), 0)
-       FROM %[1]s WHERE status = 0)`
+       FROM %[1]s WHERE status = 0),
+    (SELECT count(*) FROM %[1]s WHERE deferred_since IS NOT NULL)`
 
 // purgeSQL removes delivered rows past their retention, in bounded chunks so
 // the transaction stays short. SKIP LOCKED keeps two replicas from waiting on

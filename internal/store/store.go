@@ -145,6 +145,10 @@ type NackOutcome struct {
 	Stream   string
 	Status   core.Status
 	Attempts int
+	// Deferred reports that the row went back to pending still waiting on an
+	// unreachable broker, rather than because the broker gave a reason. It is
+	// read from the stored marker, so it cannot disagree with what the row says.
+	Deferred bool
 }
 
 // NackResult reports the outcome of a batch of failures.
@@ -157,6 +161,19 @@ type NackResult struct {
 func (r NackResult) Retried() []NackOutcome { return r.filter(core.StatusPending) }
 func (r NackResult) Failed() []NackOutcome  { return r.filter(core.StatusFailed) }
 
+// Deferred is the subset of Retried that is waiting on a broker rather than on
+// a backoff it earned.
+func (r NackResult) Deferred() []NackOutcome {
+	var out []NackOutcome
+	for _, o := range r.Outcomes {
+		if o.Deferred {
+			out = append(out, o)
+		}
+	}
+
+	return out
+}
+
 func (r NackResult) filter(status core.Status) []NackOutcome {
 	var out []NackOutcome
 	for _, o := range r.Outcomes {
@@ -168,9 +185,14 @@ func (r NackResult) filter(status core.Status) []NackOutcome {
 	return out
 }
 
-// Nack records a batch of failures, each with its own error text, permanence
-// and retry delay, against the lease that produced them.
-func (s *Store) Nack(ctx context.Context, outcomes []core.Outcome, token string, maxAttempts int) (NackResult, error) {
+// Nack records a batch of failures, each with its own error text,
+// classification and retry delay, against the lease that produced them.
+func (s *Store) Nack(
+	ctx context.Context,
+	outcomes []core.Outcome,
+	token string,
+	limits core.RetryLimits,
+) (NackResult, error) {
 	var res NackResult
 	if len(outcomes) == 0 {
 		return res, nil
@@ -179,16 +201,19 @@ func (s *Store) Nack(ctx context.Context, outcomes []core.Outcome, token string,
 	ids := make([]string, len(outcomes))
 	errs := make([]string, len(outcomes))
 	permanent := make([]bool, len(outcomes))
+	deferred := make([]bool, len(outcomes))
 	delays := make([]float64, len(outcomes))
 
 	for i, o := range outcomes {
 		ids[i] = o.ID
 		errs[i] = errText(o.Err)
 		permanent[i] = o.Permanent
+		deferred[i] = o.Deferred && !o.Permanent
 		delays[i] = o.Delay.Seconds()
 	}
 
-	rows, err := s.pool.Query(ctx, s.q.nack, token, maxAttempts, ids, errs, permanent, delays)
+	rows, err := s.pool.Query(ctx, s.q.nack,
+		token, limits.MaxAttempts, ids, errs, permanent, deferred, delays, limits.MaxDefer.Seconds())
 	if err != nil {
 		return res, fmt.Errorf("nack: %w", err)
 	}
@@ -196,7 +221,7 @@ func (s *Store) Nack(ctx context.Context, outcomes []core.Outcome, token string,
 
 	for rows.Next() {
 		var o NackOutcome
-		if err := rows.Scan(&o.ID, &o.Stream, &o.Status, &o.Attempts); err != nil {
+		if err := rows.Scan(&o.ID, &o.Stream, &o.Status, &o.Attempts, &o.Deferred); err != nil {
 			return res, fmt.Errorf("scan nack result: %w", err)
 		}
 		res.Outcomes = append(res.Outcomes, o)
@@ -275,6 +300,10 @@ type Stats struct {
 	Processing    int64
 	Failed        int64
 	OldestPending time.Duration
+	// Deferred counts rows waiting on a broker that could not be reached. It is
+	// a subset of Pending and Processing rather than a status of its own, and it
+	// is what separates a backlog that is merely growing from one that is stuck.
+	Deferred int64
 }
 
 // Stats samples the current backlog.
@@ -284,7 +313,8 @@ func (s *Store) Stats(ctx context.Context) (Stats, error) {
 		seconds float64
 	)
 
-	err := s.pool.QueryRow(ctx, s.q.stats).Scan(&st.Pending, &st.Processing, &st.Failed, &seconds)
+	err := s.pool.QueryRow(ctx, s.q.stats).
+		Scan(&st.Pending, &st.Processing, &st.Failed, &seconds, &st.Deferred)
 	if err != nil {
 		return st, fmt.Errorf("stats: %w", err)
 	}

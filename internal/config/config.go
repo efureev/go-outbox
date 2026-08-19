@@ -88,8 +88,21 @@ type DispatchConfig struct {
 	// LeaseTTL is how long a claim stays valid. It must exceed the time a
 	// batch normally takes to publish; a lease that expires mid-flight shows
 	// up as outbox_lease_conflicts_total.
-	LeaseTTL      time.Duration `env:"LEASE_TTL,default=2m"`
-	MaxAttempts   int           `env:"MAX_ATTEMPTS,default=5"`
+	LeaseTTL time.Duration `env:"LEASE_TTL,default=2m"`
+	// MaxAttempts is how many times a broker may reject a message before it is
+	// given up on. It counts rejections, not minutes: a broker that could not
+	// be reached at all never saw the message, and that failure defers the
+	// message instead of spending an attempt on it.
+	MaxAttempts int `env:"MAX_ATTEMPTS,default=5"`
+	// MaxDefer bounds how long an unreachable broker may hold a message back
+	// before it fails anyway, measured from the first deferral rather than from
+	// the row's creation.
+	//
+	// Zero — the default — means unbounded: the message waits out the outage,
+	// and outbox_oldest_pending_age_seconds is what raises the alarm. Set it
+	// only when a stream has a deadline of its own and a message delivered late
+	// is worth less than one that visibly failed.
+	MaxDefer      time.Duration `env:"MAX_DEFER,default=0s"`
 	BackoffBase   time.Duration `env:"BACKOFF_BASE,default=1m"`
 	BackoffMax    time.Duration `env:"BACKOFF_MAX,default=1h"`
 	BackoffJitter float64       `env:"BACKOFF_JITTER,default=0.2"`
@@ -143,9 +156,6 @@ type HTTPConfig struct {
 	// registered at all — an admin API reachable by anyone who can route to
 	// the pod is worse than no admin API.
 	AdminToken string `env:"ADMIN_TOKEN"`
-	// PprofToken likewise: no token, no pprof. A default token would be the same
-	// as no protection, only harder to notice.
-	PprofToken string `env:"PPROF_TOKEN"`
 }
 
 type MetricsConfig struct {

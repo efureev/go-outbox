@@ -174,37 +174,70 @@ severs the connection through a proxy rather than describing what ought to happe
 | PostgreSQL goes down | Delivery stalls; the process stays up and does not spin. Claims fail once per poll interval and are logged. `/ready` reports unhealthy, so an orchestrator stops routing to it. |
 | PostgreSQL comes back | The pool reconnects, the notification listener re-listens, delivery resumes. |
 | Everything goes down at once | The two above, together. Recovery needs no particular order. |
-| An outage longer than the retry budget | Messages stop being retried and land in `failed`, with the broker's own words in `last_error`. They stay in the table and wait for a requeue. |
+| An outage longer than the retry budget | Nothing. The budget counts rejections, and a broker that cannot be reached has not rejected anything: the messages wait, marked deferred, and go out when it returns. Set `OUTBOX_DISPATCH_MAX_DEFER` if you would rather they failed. |
+| A broker that answers and refuses | Retried with backoff until `MAX_ATTEMPTS` is spent, then `failed`, with the broker's own words in `last_error`. They stay in the table and wait for a requeue. |
 | A broker unreachable **at startup** | The process refuses to start. This is the asymmetry to know about: a broker that dies while running is contained, but one that is already dead when the dispatcher boots stops every stream, not just its own. |
 
 ### How long an outage the defaults survive
 
-The retry budget is the sum of the backoff delays before the attempts run out. On
-the defaults — `MAX_ATTEMPTS=5`, `BACKOFF_BASE=1m`, `BACKOFF_MAX=1h` — that is
-1 + 2 + 4 + 8 minutes:
+Indefinitely, by default.
 
+An unreachable broker never saw the message, so the message is not charged for
+the visit. It returns to `pending` with its attempt counter untouched, marked
+with a `deferred_since` timestamp, and is tried again on the ordinary backoff
+until the broker comes back. The attempt counter measures **rejections, not
+minutes**.
+
+That distinction is the whole point. The two failures deserve opposite
+responses:
+
+| What happened | Response | Why |
+|---|---|---|
+| The broker looked at the message and refused it | Spend an attempt. After `MAX_ATTEMPTS`, `failed`. | Retrying forever will not change its mind, and the message needs to become visible. |
+| The broker could not be reached at all | Delay, but spend nothing. | Nothing was learned about the message. Failing it makes an outage into an operator's problem twice. |
+
+The retry budget still exists and still bounds the first case. On the defaults —
+`MAX_ATTEMPTS=5`, `BACKOFF_BASE=1m`, `BACKOFF_MAX=1h` — that is 1 + 2 + 4 + 8
+minutes of rejections, fifteen in all, before a message is given up on. Raising
+`OUTBOX_DISPATCH_MAX_ATTEMPTS` is cheap because each extra attempt doubles the
+delay before it, but it no longer buys tolerance for an outage: it buys patience
+with a broker that is actively saying no.
+
+#### What to watch while a broker is down
+
+```promql
+outbox_messages_deferred                 # how many are waiting on a broker right now
+rate(outbox_messages_deferred_total[5m]) # rising: the outage is ongoing
+outbox_oldest_pending_age_seconds        # how long the oldest has waited
 ```
-15 minutes
+
+The last is the one to alert on. A backlog that is growing while
+`outbox_messages_deferred` sits at zero means the dispatcher is behind and will
+catch up; the same backlog with a deferred count equal to it means nothing will
+move until somebody fixes the broker.
+
+#### Bounding the wait
+
+Waiting forever is right for most streams and wrong for a few. A message that is
+only useful for the next ten minutes is worth less delivered late than visibly
+failed, and for those:
+
+```bash
+OUTBOX_DISPATCH_MAX_DEFER=30m
 ```
 
-An outage shorter than that is absorbed entirely: the messages sit in `pending`
-and go out when the broker returns. An outage longer than that consumes the
-budget, and whatever was still undelivered ends in `failed` awaiting
-`POST /api/v1/messages/requeue`.
+A message held back continuously for longer than that is failed, with the reason
+recorded and `outbox_messages_failed_total{reason="unreachable"}` incremented —
+a separate label from `attempts_exhausted`, because such a message was never
+rejected and its attempt counter still reads zero. Reporting it as exhausted
+would send whoever reads it looking for a rejection that never happened.
 
-Buy more time by raising `OUTBOX_DISPATCH_MAX_ATTEMPTS`, which is cheap because
-each extra attempt doubles the delay before it:
+The window measures a continuous outage, not the age of the row: it starts at
+the first deferral and is cleared the moment the message goes through or fails
+for a reason the broker actually gave. An old message meeting its first outage
+has waited none of it.
 
-| `MAX_ATTEMPTS` | Outage survived |
-|---|---|
-| 5 (default) | 15 minutes |
-| 8 | 2 hours |
-| 10 | 4 hours |
-
-The cost is that a genuinely undeliverable message — one the broker will always
-reject — takes correspondingly longer to reach `failed` and become visible. It
-does not cost throughput: a message in backoff is not claimed, so it occupies
-nothing but a row.
+The default is `0`, which means unbounded.
 
 ## Latency
 

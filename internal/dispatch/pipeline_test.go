@@ -29,6 +29,7 @@ type fakeStore struct {
 	ackResult  store.AckResult
 	nackResult store.NackResult
 	claimErr   error
+	limits     core.RetryLimits
 }
 
 func (f *fakeStore) Claim(_ context.Context, _ string, _ int, lease core.Lease) ([]core.Message, error) {
@@ -69,25 +70,35 @@ func (f *fakeStore) Ack(_ context.Context, ids []string, _ string) (store.AckRes
 	return res, nil
 }
 
-func (f *fakeStore) Nack(_ context.Context, outcomes []core.Outcome, _ string, maxAttempts int) (store.NackResult, error) {
+func (f *fakeStore) Nack(
+	_ context.Context,
+	outcomes []core.Outcome,
+	_ string,
+	limits core.RetryLimits,
+) (store.NackResult, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
 	f.nacked = append(f.nacked, outcomes)
+	f.limits = limits
 
 	if len(f.nackResult.Outcomes) > 0 || f.nackResult.Conflicts > 0 {
 		return f.nackResult, nil
 	}
 
+	// A stand-in for what the SQL does: permanence fails at once, a deferral
+	// goes back untouched, anything else advances the counter.
 	res := store.NackResult{}
 	for _, o := range outcomes {
-		status := core.StatusPending
-		if o.Permanent {
-			status = core.StatusFailed
+		out := store.NackOutcome{ID: o.ID, Status: core.StatusPending, Attempts: 1}
+		switch {
+		case o.Permanent:
+			out.Status = core.StatusFailed
+		case o.Deferred:
+			out.Attempts, out.Deferred = 0, true
 		}
-		res.Outcomes = append(res.Outcomes, store.NackOutcome{ID: o.ID, Status: status, Attempts: 1})
+		res.Outcomes = append(res.Outcomes, out)
 	}
-	_ = maxAttempts
 
 	return res, nil
 }
@@ -518,5 +529,97 @@ func TestEmptyClaimEmitsNothing(t *testing.T) {
 
 	if len(rec.iterations) != 0 {
 		t.Errorf("an idle iteration emitted %d events; nothing happened", len(rec.iterations))
+	}
+}
+
+// An unreachable broker must not be charged to the message. Without this the
+// default backoff spends the whole attempt budget in fifteen minutes, so a
+// longer restart moves every message in flight to failed even though the broker
+// never saw one of them.
+func TestUnreachableBrokerDefersInsteadOfFailing(t *testing.T) {
+	st := &fakeStore{batches: [][]core.Message{batch(3, 0)}}
+	rec := &recorder{}
+
+	down := core.Unavailable("rabbitmq unreachable", errors.New("no connection"))
+	router := &fakeRouter{errFor: map[string]error{"msg-0": down, "msg-1": down, "msg-2": down}}
+
+	if _, err := newPipeline(st, router, rec).RunOnce(t.Context()); err != nil {
+		t.Fatalf("RunOnce: %v", err)
+	}
+
+	if len(st.nacked) != 1 {
+		t.Fatalf("Nack calls = %d, want 1", len(st.nacked))
+	}
+	for _, o := range st.nacked[0] {
+		if !o.Deferred {
+			t.Errorf("%s was not marked deferred, so it would spend an attempt", o.ID)
+		}
+		if o.Permanent {
+			t.Errorf("%s was marked permanent", o.ID)
+		}
+		if o.Delay <= 0 {
+			t.Errorf("%s was rescheduled with no delay, so the outage would be retried in a tight loop", o.ID)
+		}
+	}
+
+	ev := rec.last(t)
+	if len(ev.Deferred) != 3 {
+		t.Errorf("event reports %d deferred, want 3", len(ev.Deferred))
+	}
+	// Requeued and Deferred both mean "back to pending", and separating them is
+	// the difference between an alert that fires on a broker outage and one that
+	// fires on messages the broker is rejecting.
+	if len(ev.Requeued) != 0 {
+		t.Errorf("deferred messages were also reported as retried: %v", ev.Requeued)
+	}
+	if len(ev.Failed) != 0 {
+		t.Errorf("an outage produced failures: %v", ev.Failed)
+	}
+	for _, pub := range ev.Publishes {
+		if !pub.Deferred {
+			t.Errorf("publish result for %s does not carry the classification", pub.ID)
+		}
+	}
+}
+
+// A broker that answers and refuses still exhausts the budget: that is what the
+// counter is for, and a deferral that swallowed rejections would mean nothing
+// ever reached failed.
+func TestRejectionsStillSpendAttempts(t *testing.T) {
+	st := &fakeStore{batches: [][]core.Message{batch(1, 0)}}
+	rec := &recorder{}
+
+	router := &fakeRouter{errFor: map[string]error{"msg-0": errors.New("broker nacked")}}
+
+	if _, err := newPipeline(st, router, rec).RunOnce(t.Context()); err != nil {
+		t.Fatalf("RunOnce: %v", err)
+	}
+
+	if st.nacked[0][0].Deferred {
+		t.Error("a rejection was recorded as a deferral")
+	}
+	if ev := rec.last(t); len(ev.Requeued) != 1 || len(ev.Deferred) != 0 {
+		t.Errorf("requeued = %v, deferred = %v; want one retry and no deferral", ev.Requeued, ev.Deferred)
+	}
+}
+
+// Both bounds travel with the write-back. The store cannot read the
+// configuration, so a limit left behind here silently reverts to zero — which
+// for MaxAttempts means every message fails on its first error.
+func TestWriteBackCarriesBothRetryLimits(t *testing.T) {
+	st := &fakeStore{batches: [][]core.Message{batch(1, 0)}}
+
+	cfg := testConfig()
+	cfg.Dispatch.MaxDefer = 90 * time.Minute
+	p := New("local", st, &fakeRouter{errFor: map[string]error{"msg-0": errors.New("nope")}},
+		&recorder{}, cfg, logging.Nop())
+
+	if _, err := p.RunOnce(t.Context()); err != nil {
+		t.Fatalf("RunOnce: %v", err)
+	}
+
+	want := core.RetryLimits{MaxAttempts: cfg.Dispatch.MaxAttempts, MaxDefer: 90 * time.Minute}
+	if st.limits != want {
+		t.Errorf("limits = %+v, want %+v", st.limits, want)
 	}
 }

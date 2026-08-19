@@ -18,8 +18,9 @@
 |------------------------------------|-----------|-------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------|
 | `outbox_messages_claimed_total`    | counter   | stream, driver, attempt | Сообщений взято в обработку. `attempt` — `initial` или `retry`.                                                                                      |
 | `outbox_messages_dispatched_total` | counter   | stream, driver          | Сообщений принято брокером.                                                                                                                          |
-| `outbox_messages_retried_total`    | counter   | stream, driver          | Сообщений возвращено в pending после retryable-отказа.                                                                                               |
-| `outbox_messages_failed_total`     | counter   | stream, driver, reason  | Сообщений, которые встали. `reason` — `permanent` или `attempts_exhausted`; только второе означает, что проблема вообще была в брокере.              |
+| `outbox_messages_retried_total`    | counter   | stream, driver          | Сообщений возвращено в pending после отказа брокера.                                                                                                 |
+| `outbox_messages_deferred_total`   | counter   | stream, driver          | Сообщений возвращено в pending **без траты попытки**, потому что до брокера не достучались. Растёт при неподвижном `retried_total` — это подпись аварии, а не отказов. |
+| `outbox_messages_failed_total`     | counter   | stream, driver, reason  | Сообщений, которые встали. `reason` — `permanent`, `attempts_exhausted` или `unreachable`; последнее означает, что брокер не вернулся за `MAX_DEFER`, и счётчик попыток по-прежнему нулевой. |
 | `outbox_delivery_lag_seconds`      | histogram | stream, driver          | Время от записи сообщения продюсером до приёма брокером. Считается целиком по часам БД, поэтому не вбирает в себя расхождение часов процесса и базы. |
 | `outbox_publish_duration_seconds`  | histogram | stream, driver, result  | Время публикации.                                                                                                                                    |
 
@@ -29,6 +30,7 @@
 |-------------------------------------|-----------|--------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | `outbox_oldest_pending_age_seconds` | gauge     | —      | Сколько ждёт самое старое недоставленное сообщение. Самый ясный сигнал отставания доставки: счётчик говорит, сколько ждёт, а это — как долго.                          |
 | `outbox_messages_by_status`         | gauge     | status | Строк в каждом нетерминальном статусе. Доставленные намеренно отсутствуют — считать их означает их сканировать, а `outbox_messages_dispatched_total` их уже покрывает. |
+| `outbox_messages_deferred`          | gauge     | —                       | Сколько строк прямо сейчас ждёт недоступного брокера. Подмножество pending и processing, а не отдельный статус. Отличает бэклог, который движется медленно, от того, который не движется вовсе. |
 | `outbox_batch_size`                 | histogram | stream | Сообщений на один захват. Стабильно упирается в максимум — диспетчер не успевает.                                                                                      |
 | `outbox_iteration_duration_seconds` | histogram | stream | Один цикл «захват — публикация — запись результата».                                                                                                                   |
 
@@ -106,6 +108,17 @@ groups:
         labels: { severity: warning }
         annotations:
           summary: Устойчивые отказы публикации в брокер.
+
+      - alert: OutboxBrokerUnreachable
+        expr: sum by (stream) (rate(outbox_messages_deferred_total[5m])) > 0
+        for: 10m
+        labels: {severity: critical}
+        annotations:
+          summary: Брокер недоступен десять минут, и его стрим стоит.
+          description: >
+            Сообщения целы, счётчики попыток не тронуты — они уйдут сами, когда
+            брокер вернётся. Возвращать в очередь ничего не нужно. Сколько именно
+            ждёт, показывает outbox_messages_deferred.
 
       - alert: OutboxReclaimingLeases
         expr: increase(outbox_messages_reclaimed_total[15m]) > 0
