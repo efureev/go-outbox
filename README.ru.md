@@ -67,7 +67,7 @@
   неверный порог, опечатка в ключе драйвера, три драйвера без DSN, — так что на
   диагностику уходит один перезапуск, а не по одному на каждую ошибку.
 
-- **Доказано, а не заявлено.** 161 тест, половина — против настоящих PostgreSQL,
+- **Доказано, а не заявлено.** 163 теста, половина — против настоящих PostgreSQL,
   RabbitMQ и Redpanda: набор правил конкурентности, выраженных в SQL, нельзя
   проверить моком, сверяющим текст запроса.
 
@@ -245,7 +245,9 @@ curl -X POST -H 'Authorization: Bearer $TOKEN' \
 SELECT outbox.requeue(ARRAY['…']::uuid[]);
 ```
 
-Метрики и стартовые алерты: [docs/MetricsAndAlerts.ru.md](docs/MetricsAndAlerts.ru.md).
+Метрики, стартовые алерты и дашборд Grafana для импорта
+([`dashboards/outbox.json`](dashboards/outbox.json)):
+[docs/MetricsAndAlerts.ru.md](docs/MetricsAndAlerts.ru.md).
 
 ## Документация
 
@@ -255,7 +257,8 @@ SELECT outbox.requeue(ARRAY['…']::uuid[]);
 - [Публичный контракт](docs/PublicContract.ru.md) — какие колонки пишет
   продюсер, правила маршрутизации и что явно не гарантируется.
 - [Конфигурация](docs/Config.ru.md) — все переменные окружения.
-- [Метрики и алерты](docs/MetricsAndAlerts.ru.md).
+- [Метрики и алерты](docs/MetricsAndAlerts.ru.md) — все метрики, стартовые
+  алерты и дашборд.
 - [Эксплуатация](docs/Operations.ru.md) — развёртывание, масштабирование и что
   делать, когда что-то пошло не так.
 - [Роадмап](docs/Roadmap.ru.md) — что уже выпущено, что дальше и в каком порядке,

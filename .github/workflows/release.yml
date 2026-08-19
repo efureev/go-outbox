@@ -10,6 +10,10 @@ on:
   push:
     tags: ["v*"]
 
+# Signing is keyless: cosign gets a short-lived certificate from Fulcio against
+# the workflow's OIDC identity, so there is no private key to store, rotate or
+# leak. What a verifier checks is that this repository, on this workflow,
+# produced the artefact.
 permissions:
   contents: read
 
@@ -19,6 +23,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write          # to create the release
+      id-token: write          # to get a signing certificate from Fulcio
     steps:
       - uses: actions/checkout@v7
         with:
@@ -30,8 +35,37 @@ jobs:
           cache: true
 
       # The same target a developer runs, so what ships is what was tested.
+      # SBOM=1 additionally writes a CycloneDX document per binary, describing
+      # the artefact that ships rather than the working tree it came from.
       - name: Cross-compile
-        run: make dist VERSION="${GITHUB_REF_NAME#v}"
+        run: make dist SBOM=1 VERSION="${GITHUB_REF_NAME#v}"
+
+      - name: Install cosign
+        run: |
+          set -euo pipefail
+          # Pinned by version and by hash. Fetching a signing tool over the
+          # network without checking what came back would be an odd way to
+          # start signing things.
+          version=v3.1.3
+          sha=4629c757b7618056f8ddd7e2625ae9fdd94c0372a65049520bc7d9df9efc7f71
+
+          curl -fsSL -o /tmp/cosign \
+            "https://github.com/sigstore/cosign/releases/download/$version/cosign-linux-amd64"
+          echo "$sha  /tmp/cosign" | sha256sum -c -
+          chmod +x /tmp/cosign
+          sudo mv /tmp/cosign /usr/local/bin/cosign
+          cosign version
+
+      # Signing the checksum file covers every archive and every SBOM through
+      # it, so one signature is enough and there is one thing to verify.
+      #
+      # --bundle, not --output-signature and --output-certificate: those are
+      # deprecated in cosign 3, and it refuses to run without a bundle path
+      # rather than falling back to them.
+      - name: Sign the checksums
+        env:
+          COSIGN_YES: "true"
+        run: cosign sign-blob dist/SHA256SUMS --bundle dist/SHA256SUMS.cosign.bundle
 
       - name: Publish the release
         env:
@@ -60,7 +94,8 @@ jobs:
             --title "$GITHUB_REF_NAME" \
             --notes "$notes" \
             $prerelease \
-            dist/*.tar.gz dist/SHA256SUMS
+            dist/*.tar.gz dist/*.cdx.json \
+            dist/SHA256SUMS dist/SHA256SUMS.cosign.bundle
 
   image:
     name: Image
@@ -68,6 +103,7 @@ jobs:
     permissions:
       contents: read
       packages: write          # to push to ghcr.io
+      id-token: write          # to get a signing certificate from Fulcio
     steps:
       - uses: actions/checkout@v7
 
@@ -101,4 +137,31 @@ jobs:
             --build-arg COMMIT="${GITHUB_SHA::7}" \
             --build-arg BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
             $tags \
+            --metadata-file /tmp/build.json \
             --push .
+
+          # The digest, not a tag: a tag is a name that can be moved to point
+          # somewhere else, and a signature against one says nothing about what
+          # anybody actually pulls.
+          digest=$(python3 -c 'import json;print(json.load(open("/tmp/build.json"))["containerimage.digest"])')
+          echo "IMAGE_REF=$image@$digest" >> "$GITHUB_ENV"
+
+      - name: Install cosign
+        run: |
+          set -euo pipefail
+          version=v3.1.3
+          sha=4629c757b7618056f8ddd7e2625ae9fdd94c0372a65049520bc7d9df9efc7f71
+
+          curl -fsSL -o /tmp/cosign \
+            "https://github.com/sigstore/cosign/releases/download/$version/cosign-linux-amd64"
+          echo "$sha  /tmp/cosign" | sha256sum -c -
+          chmod +x /tmp/cosign
+          sudo mv /tmp/cosign /usr/local/bin/cosign
+
+      # After the push rather than before it: the image is already public at
+      # this point, so a signing failure costs a red run and a retry, not a
+      # release that never happened.
+      - name: Sign the image
+        env:
+          COSIGN_YES: "true"
+        run: cosign sign "$IMAGE_REF"

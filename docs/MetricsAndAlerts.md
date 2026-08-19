@@ -67,6 +67,23 @@ whatever it likes into the `stream` column.
 - `messages_failed_total{reason="permanent"}` rising — a configuration or
   routing mistake, not an outage. Retrying will not help and is not happening.
 
+## Dashboard
+
+[`dashboards/outbox.json`](../dashboards/outbox.json) is a Grafana dashboard for
+the metrics above. Import it under **Dashboards → New → Import**, or provision
+it from a file; it asks for a data source on import and needs nothing else.
+
+Thirteen panels in four rows: whether delivery is keeping up, throughput and
+lag, what is going wrong, and the detail behind it. A `stream` variable narrows
+every panel to one stream, which is the view worth having when several brokers
+are configured and only one of them is the problem.
+
+It is checked against the code rather than against a screenshot. A test walks
+every query in the file and fails if it names a metric the dispatcher does not
+register, or filters on a label that metric does not carry — both of which
+render an empty panel that reads as "nothing is happening" and is
+indistinguishable from good news.
+
 ## Starting alert rules
 
 Thresholds are a starting point. Calibrate them against the delivery SLA, the

@@ -68,6 +68,23 @@ jobs:
           OUTBOX_TEST_KAFKA_BROKERS: localhost:19092
         run: go test -race -tags integration -timeout 15m ./test/integration/...
 
+  # Reported separately from the tests: a vulnerability is a fact about the
+  # dependencies, not a failure of the code, and it should not be discovered
+  # only by whoever is looking at a red test run.
+  vuln:
+    name: Vulnerabilities
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+      # The same target a developer runs. govulncheck reports only the
+      # vulnerabilities the code actually reaches, so a finding here is one
+      # somebody has to act on rather than a line in an advisory feed.
+      - run: make vuln
+
   lint:
     runs-on: ubuntu-latest
     steps:

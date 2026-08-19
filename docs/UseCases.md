@@ -207,6 +207,39 @@ useradd --system --no-create-home --shell /usr/sbin/nologin outbox
 install -d -o root -g outbox -m 0750 /etc/outbox
 ```
 
+
+`SHA256SUMS` tells you the download was not corrupted. To also establish that it
+came from this repository's release workflow and not from somebody who reached
+the release page:
+
+```bash
+curl -fsSLO "https://github.com/efureev/go-outbox/releases/download/v$VERSION/SHA256SUMS.cosign.bundle"
+
+cosign verify-blob SHA256SUMS \
+  --bundle SHA256SUMS.cosign.bundle \
+  --certificate-identity-regexp 'https://github.com/efureev/go-outbox/.github/workflows/release.yml@.*' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com
+```
+
+Signing is keyless: there is no public key to distribute, and no private key for
+anyone to steal. What the two `--certificate-*` flags check is that the
+signature was made by that workflow in that repository — so pin them, because
+without them any Sigstore signature at all would satisfy the command.
+
+The container image is signed by digest, for the same reason a tag is not worth
+signing: a tag is a name that can be moved.
+
+```bash
+cosign verify ghcr.io/efureev/go-outbox:$VERSION \
+  --certificate-identity-regexp 'https://github.com/efureev/go-outbox/.github/workflows/release.yml@.*' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com
+```
+
+Each release also carries a CycloneDX SBOM per platform,
+`outbox_${VERSION}_linux_amd64.cdx.json` and its siblings. They are generated
+from the compiled binaries rather than from the source tree, so they list what
+was actually linked in.
+
 `/etc/outbox/outbox.env`, mode `0640`, owned `root:outbox` — it holds a
 password:
 

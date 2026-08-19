@@ -21,6 +21,39 @@ All notable changes to this project are documented here. The format follows
   `outbox failed -stream local`, `outbox requeue <id>...`, `outbox requeue -before <RFC3339>`, and
   `-json` on any of them for a pipe into `jq`.
 
+- **`govulncheck` on every CI run**, and `make vuln` so it is the same command locally. It reports
+  only the vulnerabilities the code actually reaches, so a finding is something to act on rather
+  than a line in an advisory feed. It runs as its own job: a vulnerable dependency is a fact about
+  the module, not a failing test, and should not be discovered by whoever happens to be reading a
+  red test run.
+
+- **A CycloneDX SBOM per platform, attached to every release.** Generated from the compiled binaries
+  rather than from the source tree, so each one lists what was actually linked into the artefact it
+  describes. `make dist SBOM=1` writes them beside the archives, and `make sbom` writes one for a
+  local build; the default stays off so a developer's `make dist` needs no extra tool.
+
+- **Keyless cosign signatures on the release and the image.** `SHA256SUMS.cosign.bundle` covers
+  every archive and every SBOM through the checksum file, and the image is signed by digest — a tag
+  is a name that can be moved, so a signature against one says nothing about what anybody pulls.
+  There is no key to distribute or to lose: cosign gets a short-lived certificate against the
+  workflow's OIDC identity, and what a verifier establishes is that this repository, on this
+  workflow, produced the artefact. Verification commands are in
+  [docs/UseCases.md](docs/UseCases.md#install).
+
+  Tool versions are pinned, and cosign's own download is checked against a recorded hash. Fetching a
+  signing tool over the network without checking what came back would be an odd way to start
+  signing things.
+
+- **A Grafana dashboard**, [`dashboards/outbox.json`](dashboards/outbox.json). Alert rules shipped
+  without one, so every adopter built the same panels from the same metric reference. Thirteen
+  panels in four rows, with a `stream` variable for narrowing to one broker when only one of them is
+  the problem.
+
+  It is checked against the code rather than against a screenshot: a test walks every query in the
+  file and fails if it names a metric the dispatcher does not register, or filters on a label that
+  metric does not carry. Both render an empty panel, which reads as "nothing is happening" and is
+  indistinguishable from good news until somebody needs it.
+
 - **`?stream=` on `GET /api/v1/messages/failed`**, so working through one broker's backlog does not
   mean paging through everybody else's. The CLI needed the filter first; adding it to the endpoint
   too is what keeps parity a fact rather than a claim.

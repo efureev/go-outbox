@@ -208,6 +208,39 @@ useradd --system --no-create-home --shell /usr/sbin/nologin outbox
 install -d -o root -g outbox -m 0750 /etc/outbox
 ```
 
+
+`SHA256SUMS` подтверждает, что скачанное не побилось. Чтобы вдобавок убедиться,
+что оно пришло из релизного workflow этого репозитория, а не от того, кто
+дотянулся до страницы релиза:
+
+```bash
+curl -fsSLO "https://github.com/efureev/go-outbox/releases/download/v$VERSION/SHA256SUMS.cosign.bundle"
+
+cosign verify-blob SHA256SUMS \
+  --bundle SHA256SUMS.cosign.bundle \
+  --certificate-identity-regexp 'https://github.com/efureev/go-outbox/.github/workflows/release.yml@.*' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com
+```
+
+Подпись keyless: раздавать нечего и красть нечего — нет ни публичного ключа, ни
+приватного. Оба флага `--certificate-*` проверяют, что подписал именно этот
+workflow в этом репозитории, поэтому их надо указывать: без них команду устроит
+любая подпись Sigstore вообще.
+
+Образ подписан по digest — по той же причине, по которой не стоит подписывать
+тег: тег это имя, и его можно передвинуть.
+
+```bash
+cosign verify ghcr.io/efureev/go-outbox:$VERSION \
+  --certificate-identity-regexp 'https://github.com/efureev/go-outbox/.github/workflows/release.yml@.*' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com
+```
+
+К каждому релизу прикладывается CycloneDX SBOM на платформу —
+`outbox_${VERSION}_linux_amd64.cdx.json` и соседние. Они сгенерированы из
+собранных бинарников, а не из дерева исходников, поэтому перечисляют то, что
+действительно вошло в сборку.
+
 `/etc/outbox/outbox.env`, режим `0640`, владелец `root:outbox` — внутри пароль:
 
 ```dotenv

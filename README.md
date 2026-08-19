@@ -64,7 +64,7 @@ application beyond one `INSERT`.
   misspelled driver key, three drivers each missing a DSN — so a misconfigured
   deployment takes one restart to diagnose rather than one per mistake.
 
-- **Proven, not asserted.** 161 tests, half of them against real PostgreSQL, RabbitMQ
+- **Proven, not asserted.** 163 tests, half of them against real PostgreSQL, RabbitMQ
   and Redpanda, because a set of concurrency rules expressed in SQL cannot be checked
   by a mock that matches query text.
 
@@ -242,7 +242,9 @@ curl -X POST -H 'Authorization: Bearer $TOKEN' \
 SELECT outbox.requeue(ARRAY['…']::uuid[]);
 ```
 
-Metrics and starting alert rules: [docs/MetricsAndAlerts.md](docs/MetricsAndAlerts.md).
+Metrics, starting alert rules and a Grafana dashboard to import
+([`dashboards/outbox.json`](dashboards/outbox.json)):
+[docs/MetricsAndAlerts.md](docs/MetricsAndAlerts.md).
 
 ## Documentation
 
@@ -251,7 +253,8 @@ Metrics and starting alert rules: [docs/MetricsAndAlerts.md](docs/MetricsAndAler
 - [Public contract](docs/PublicContract.md) — the columns a producer writes, the
   routing rules, and what is explicitly not guaranteed.
 - [Configuration](docs/Config.md) — every environment variable.
-- [Metrics and alerts](docs/MetricsAndAlerts.md).
+- [Metrics and alerts](docs/MetricsAndAlerts.md) — every metric, starting alert
+  rules, and the dashboard.
 - [Operations](docs/Operations.md) — deploying, scaling, and what to do when
   something is wrong.
 - [Roadmap](docs/Roadmap.md) — what has shipped, what comes next in the order it

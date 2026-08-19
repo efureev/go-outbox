@@ -11,6 +11,17 @@ COVERAGE   ?= coverage.out
 # it on a developer's own machine.
 DIST      ?= dist
 PLATFORMS ?= linux/amd64 linux/arm64 darwin/amd64 darwin/arm64
+# SBOM=1 writes a CycloneDX document beside each archive. Off by default so a
+# developer's `make dist` needs no extra tool; the release sets it explicitly,
+# which is what keeps it from being skipped silently there.
+SBOM      ?= 0
+
+# Tools are pinned rather than fetched at @latest: a release pipeline that
+# changes what it runs without a commit is a release pipeline that breaks on
+# somebody else's schedule. govulncheck reads its vulnerability database over
+# the network at run time, so pinning the tool does not pin the findings.
+GOVULNCHECK ?= golang.org/x/vuln/cmd/govulncheck@v1.7.0
+CYCLONEDX   ?= github.com/CycloneDX/cyclonedx-gomod/cmd/cyclonedx-gomod@v1.11.0
 
 BENCHTIME     ?= 3000x
 BENCHLATENCY  ?= 200x
@@ -83,6 +94,15 @@ lint: ## Run the linter, pinned to the CI version
 lint-host: ## Run the linter from PATH (faster; may differ from CI)
 	golangci-lint run
 
+vuln: ## Report known vulnerabilities that the code actually reaches
+	go run $(GOVULNCHECK) ./...
+	go run $(GOVULNCHECK) -tags integration ./...
+
+sbom: ## Write a CycloneDX document for the built binary
+	@$(MAKE) --no-print-directory build
+	go run $(CYCLONEDX) bin -json -output outbox.cdx.json "$(BIN)"
+	@printf 'wrote outbox.cdx.json\n'
+
 fmt: ## Format the code, pinned to the CI version
 	$(LINT_RUN) golangci-lint fmt
 
@@ -119,11 +139,16 @@ dist: ## Cross-compile the release archives into dist/
 		printf '  %s\n' "$$platform"; \
 		CGO_ENABLED=0 GOOS=$$os GOARCH=$$arch \
 			go build -trimpath -ldflags "$(LDFLAGS)" -o "$(DIST)/$$name/outbox" ./cmd/outbox || exit 1; \
+		if [ "$(SBOM)" = 1 ]; then \
+			go run $(CYCLONEDX) bin -json \
+				-output "$(DIST)/$$name.cdx.json" "$(DIST)/$$name/outbox" || exit 1; \
+		fi; \
 		cp LICENSE README.md "$(DIST)/$$name/"; \
 		tar -czf "$(DIST)/$$name.tar.gz" -C "$(DIST)" "$$name"; \
 		rm -rf "$(DIST)/$$name"; \
 	done
-	@cd "$(DIST)" && { command -v sha256sum >/dev/null && sha256sum *.tar.gz || shasum -a 256 *.tar.gz; } > SHA256SUMS
+	@cd "$(DIST)" && files=$$(printf '%s\n' *.tar.gz *.cdx.json | grep -v '[*]') && \
+		{ command -v sha256sum >/dev/null && sha256sum $$files || shasum -a 256 $$files; } > SHA256SUMS
 	@ls -1 "$(DIST)"
 
 image: ## Build the container image

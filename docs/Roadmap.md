@@ -17,8 +17,8 @@ would land rather than when.
 | An outage must not spend the retry budget | **Shipped in 1.2.0** |
 | Stop claiming for a stream whose broker is unreachable | **Shipped in 1.3.0** |
 | CLI parity with the admin API | **Done**, not yet released |
-| A Grafana dashboard as JSON | Planned — 1.4 |
-| Supply-chain hygiene in CI | Planned — 1.4 |
+| A Grafana dashboard as JSON | **Done**, not yet released |
+| Supply-chain hygiene in CI | **Done**, not yet released |
 | OpenTelemetry spans | Planned — 1.5 |
 | Table partitioning, and a soak target | Planned — 1.6 |
 | NATS JetStream, Redis Streams, a `database/sql` client | Planned — 1.7 |
@@ -65,9 +65,10 @@ Details in [the changelog](../CHANGELOG.md) and
 
 ## 1.4 — finishing the operational round
 
-The two items that made an outage survivable have shipped. What is left of this
-round is the part an operator touches: the tools they reach for at three in the
-morning, and the evidence that what they are running is what was built.
+Complete, awaiting a release. The two items that made an outage survivable
+shipped as 1.2.0 and 1.3.0; these three are the part an operator touches — the
+tools they reach for at three in the morning, and the evidence that what they
+are running is what was built.
 
 **CLI parity with the admin API** — done, not yet released. `outbox stats`,
 `outbox failed` and `outbox requeue` reach the database directly, so requeueing
@@ -76,13 +77,13 @@ configuration than the dispatcher does, which was the part worth getting right:
 the moment you need to see what stopped is often the moment the routing table is
 what is wrong.
 
-**A Grafana dashboard as JSON.** We ship alert rules but no dashboard, so every
-adopter builds the same six panels. Backlog, oldest pending age, dispatch rate
-per stream, failure rate, reclaims, publish latency quantiles.
+**A Grafana dashboard as JSON** — done, not yet released.
+[`dashboards/outbox.json`](../dashboards/outbox.json), checked against the metric
+set by a test so a renamed metric cannot leave an empty panel behind.
 
-**Supply-chain hygiene in CI.** `govulncheck` on every run, an SBOM attached to
-the release, cosign signatures on the image and the binaries. Cheap, and it
-stops mattering only if nobody else ever runs this.
+**Supply-chain hygiene in CI** — done, not yet released. `govulncheck` on every
+run, a CycloneDX SBOM per platform attached to the release, and keyless cosign
+signatures on the checksums and on the image by digest.
 
 ---
 
