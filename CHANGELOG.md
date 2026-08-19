@@ -6,6 +6,34 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **`outbox stats`, `outbox failed` and `outbox requeue`** — the admin API's operations as
+  subcommands, over the database connection instead of over HTTP. The HTTP route needs a reachable
+  pod, a token and a JSON body; what is to hand during an incident is a shell in the container the
+  binary already lives in. Both paths run the same store calls, so neither can drift into being the
+  one that does it correctly.
+
+  Authorisation differs on purpose. The endpoints are guarded by `OUTBOX_HTTP_ADMIN_TOKEN` because
+  anything that can route to the pod can call them; the commands are guarded by holding the database
+  credentials, which is a stronger thing to have.
+
+  `outbox failed -stream local`, `outbox requeue <id>...`, `outbox requeue -before <RFC3339>`, and
+  `-json` on any of them for a pipe into `jq`.
+
+- **`?stream=` on `GET /api/v1/messages/failed`**, so working through one broker's backlog does not
+  mean paging through everybody else's. The CLI needed the filter first; adding it to the endpoint
+  too is what keeps parity a fact rather than a claim.
+
+### Changed
+
+- **Administrative commands check only the configuration they use.** `migrate`, `stats`, `failed`
+  and `requeue` need a database and nothing else, and previously refused to run on a broken routing
+  table. The moment an operator most needs to see what stopped is often the moment the routing table
+  is what is wrong, and a tool that answers "your broker is misconfigured" to the question "what
+  failed?" is useless precisely then. The dispatcher itself is unchanged: it still refuses to start
+  without a routing table, because it cannot deliver without one.
+
 ## [1.3.0] — 2026-08-19
 
 ### Added

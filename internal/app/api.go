@@ -132,7 +132,9 @@ func (m *httpModule) handleListFailed(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	messages, err := m.store.ListFailed(r.Context(), cursor, limit)
+	// An unconfigured stream is not an error: it simply matches nothing, which
+	// is the same answer as a configured stream with no failures.
+	messages, err := m.store.ListFailed(r.Context(), cursor, limit, r.URL.Query().Get("stream"))
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "could not list failed messages: "+err.Error())
 

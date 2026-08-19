@@ -64,7 +64,7 @@ application beyond one `INSERT`.
   misspelled driver key, three drivers each missing a DSN — so a misconfigured
   deployment takes one restart to diagnose rather than one per mistake.
 
-- **Proven, not asserted.** 156 tests, half of them against real PostgreSQL, RabbitMQ
+- **Proven, not asserted.** 161 tests, half of them against real PostgreSQL, RabbitMQ
   and Redpanda, because a set of concurrency rules expressed in SQL cannot be checked
   by a mock that matches query text.
 
@@ -221,9 +221,14 @@ Full reference: [docs/Config.md](docs/Config.md).
 | `GET /health` | Liveness. Does not probe dependencies. |
 | `GET /ready` | Readiness: every module reports healthy. |
 | `GET /api/v1/stats` | Backlog counts, configured streams and drivers, settings. |
-| `GET /api/v1/messages/failed` | Page through what stopped, and why. |
+| `GET /api/v1/messages/failed` | Page through what stopped, and why. `?stream=` narrows it to one. |
 | `POST /api/v1/messages/requeue` | Return failed messages to the queue. Requires `OUTBOX_HTTP_ADMIN_TOKEN`. |
 | `GET /metrics` (port 9100) | Prometheus. |
+
+The last three are also subcommands — `outbox stats`, `outbox failed`,
+`outbox requeue` — reaching the database directly instead of the pod. Same store
+calls, different authorisation: the endpoints take a token, the commands take the
+database credentials.
 
 Returning failed messages to the queue, from anywhere:
 

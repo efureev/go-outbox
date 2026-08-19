@@ -116,17 +116,42 @@ curl -s localhost:8085/api/v1/stats | jq .messages
 
 ### Сообщения падают
 
+Из шелла внутри контейнера — там, где бинарник и так лежит:
+
 ```bash
-curl -s 'localhost:8085/api/v1/messages/failed?limit=20' | jq '.messages[] | {id, topic, attempts, last_error}'
+outbox failed -limit 20
+outbox failed -stream local -json | jq '.messages[] | {id, topic, last_error}'
 ```
 
 В `last_error` лежит формулировка самого брокера. После устранения причины:
 
 ```bash
+outbox requeue 3b73a835-1aee-45e7-9dc1-36f38ace64e9
+outbox requeue -before 2026-01-01T00:00:00Z -limit 1000
+```
+
+Либо по HTTP — те же операции оттуда, где бинарника нет:
+
+```bash
+curl -s 'localhost:8085/api/v1/messages/failed?limit=20&stream=local' \
+  | jq '.messages[] | {id, topic, attempts, last_error}'
+
 curl -X POST -H "Authorization: Bearer $TOKEN" \
   localhost:8085/api/v1/messages/requeue \
   -d '{"failed_before":"2026-01-01T00:00:00Z","limit":1000}'
 ```
+
+Оба пути вызывают одни и те же методы store, поэтому ни один не может стать тем
+единственным, который делает это правильно. Различается авторизация, и намеренно:
+эндпоинтам нужен `OUTBOX_HTTP_ADMIN_TOKEN`, потому что вызвать их может всякий,
+кто дотягивается до пода, а командам нужны учётные данные базы — а это более
+сильная вещь на руках.
+
+Команды к тому же проверяют меньшую часть конфигурации, чем диспетчер: ровно
+столько, чтобы дойти до базы. Момент, когда сильнее всего нужно увидеть, что
+встало, — часто тот же момент, когда сломана как раз таблица маршрутизации, и
+инструмент, отвечающий «у вас неверно настроен брокер» на вопрос «что упало?»,
+бесполезен именно тогда.
 
 Рост `outbox_messages_failed_total{reason="permanent"}` указывает не на аварию,
 а на конфигурацию — недоставляемый exchange, неизвестный топик,

@@ -12,6 +12,26 @@ import (
 // sequence of restarts, each revealing one more mistake.
 func (c Config) Validate() error { return c.validate(nil) }
 
+// validateAdmin checks only what a one-shot administrative command touches: the
+// database it connects to, and the identifiers that are interpolated into SQL
+// rather than passed as parameters. Everything else belongs to a running
+// dispatcher, which these commands are not.
+func (c Config) validateAdmin() error {
+	var errs []error
+
+	add := func(format string, args ...any) {
+		errs = append(errs, fmt.Errorf(format, args...))
+	}
+
+	c.validateDB(add)
+
+	if len(errs) == 0 {
+		return nil
+	}
+
+	return fmt.Errorf("invalid configuration:\n  - %s", joinErrors(errs, "\n  - "))
+}
+
 // validate accepts an error carried over from assembling the routing table, so
 // that a driver problem and a threshold problem are reported together.
 func (c Config) validate(prior error) error {

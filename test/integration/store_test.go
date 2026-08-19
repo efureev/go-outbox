@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/efureev/go-outbox/internal/core"
+	"github.com/efureev/go-outbox/internal/store"
 )
 
 func TestClaimLeasesMessages(t *testing.T) {
@@ -916,5 +917,68 @@ func TestStatsCountsWhatIsWaitingOnABroker(t *testing.T) {
 	}
 	if st.Deferred != 1 {
 		t.Errorf("Deferred = %d, want 1", st.Deferred)
+	}
+}
+
+// The failed listing answers "what stopped, and why". With several streams
+// configured it has to be able to answer it one stream at a time, or an
+// operator working through one broker's backlog pages through everybody else's.
+func TestListFailedFiltersByStream(t *testing.T) {
+	f := newFixture(t)
+
+	fail := func(stream string, n int) {
+		t.Helper()
+
+		f.seed(t, stream, n)
+
+		l := lease("a", time.Minute)
+		claimed, err := f.Store.Claim(t.Context(), stream, n, l)
+		if err != nil {
+			t.Fatalf("claim %s: %v", stream, err)
+		}
+
+		outcomes := make([]core.Outcome, len(claimed))
+		for i, m := range claimed {
+			outcomes[i] = core.Outcome{
+				ID: m.ID, Err: core.Permanent("unroutable", errors.New("NO_ROUTE")), Permanent: true,
+			}
+		}
+		if _, err := f.Store.Nack(t.Context(), outcomes, l.Token, limits(5)); err != nil {
+			t.Fatalf("nack %s: %v", stream, err)
+		}
+	}
+
+	fail("local", 2)
+	fail("global", 3)
+
+	all, err := f.Store.ListFailed(t.Context(), store.Cursor{}, 50, "")
+	if err != nil {
+		t.Fatalf("list all: %v", err)
+	}
+	if len(all) != 5 {
+		t.Fatalf("unfiltered listing returned %d, want 5", len(all))
+	}
+
+	only, err := f.Store.ListFailed(t.Context(), store.Cursor{}, 50, "global")
+	if err != nil {
+		t.Fatalf("list global: %v", err)
+	}
+	if len(only) != 3 {
+		t.Fatalf("filtered listing returned %d, want 3", len(only))
+	}
+	for _, m := range only {
+		if m.Stream != "global" {
+			t.Errorf("message %s belongs to stream %q", m.ID, m.Stream)
+		}
+	}
+
+	// An unconfigured name is not an error: it matches nothing, which is the
+	// same answer as a stream that has no failures.
+	none, err := f.Store.ListFailed(t.Context(), store.Cursor{}, 50, "no-such-stream")
+	if err != nil {
+		t.Fatalf("list unknown: %v", err)
+	}
+	if len(none) != 0 {
+		t.Errorf("an unknown stream matched %d messages", len(none))
 	}
 }

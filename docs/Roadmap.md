@@ -16,7 +16,7 @@ would land rather than when.
 |---|---|
 | An outage must not spend the retry budget | **Shipped in 1.2.0** |
 | Stop claiming for a stream whose broker is unreachable | **Shipped in 1.3.0** |
-| CLI parity with the admin API | Planned — 1.4 |
+| CLI parity with the admin API | **Done**, not yet released |
 | A Grafana dashboard as JSON | Planned — 1.4 |
 | Supply-chain hygiene in CI | Planned — 1.4 |
 | OpenTelemetry spans | Planned — 1.5 |
@@ -69,11 +69,12 @@ The two items that made an outage survivable have shipped. What is left of this
 round is the part an operator touches: the tools they reach for at three in the
 morning, and the evidence that what they are running is what was built.
 
-**CLI parity with the admin API.** `outbox failed`, `outbox requeue`,
-`outbox stats` as subcommands, reading the same DSN as the daemon. Requeuing
-needs curl and a token today, or psql. The binary is already inside the
-container: `docker exec app-outbox-1 outbox failed --stream local` is what
-somebody will actually reach for at three in the morning.
+**CLI parity with the admin API** — done, not yet released. `outbox stats`,
+`outbox failed` and `outbox requeue` reach the database directly, so requeueing
+no longer needs curl, a token and a reachable pod. They also check less of the
+configuration than the dispatcher does, which was the part worth getting right:
+the moment you need to see what stopped is often the moment the routing table is
+what is wrong.
 
 **A Grafana dashboard as JSON.** We ship alert rules but no dashboard, so every
 adopter builds the same six panels. Backlog, oldest pending age, dispatch rate

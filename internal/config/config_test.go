@@ -369,3 +369,41 @@ func TestEndpointReportsTheBrokerWithoutCredentials(t *testing.T) {
 		t.Errorf("kafka endpoint = %q, want the broker list", got)
 	}
 }
+
+// An administrative command needs a database and nothing else. Holding it to
+// the dispatcher's standard means that the moment an operator most needs to see
+// what stopped — which is often the moment the configuration is what is wrong —
+// the tool answers with a complaint about a broker it is not going to talk to.
+func TestLoadAdminDoesNotNeedARoutingTable(t *testing.T) {
+	cfg, err := LoadAdminFrom(env(t, "OUTBOX_DB_USER=outbox", "OUTBOX_DB_NAME=app"))
+	if err != nil {
+		t.Fatalf("LoadAdminFrom: %v", err)
+	}
+
+	if cfg.DB.Name != "app" {
+		t.Errorf("DB.Name = %q, want app", cfg.DB.Name)
+	}
+	if len(cfg.Brokers.Streams) != 0 {
+		t.Errorf("a routing table was assembled from nothing: %v", cfg.Brokers.Streams)
+	}
+
+	// The same input must still be rejected for a dispatcher, or this is not a
+	// narrower check but a missing one.
+	if _, err := LoadFrom(env(t, "OUTBOX_DB_USER=outbox", "OUTBOX_DB_NAME=app")); err == nil {
+		t.Error("the dispatcher accepted a configuration with no drivers")
+	}
+}
+
+// Narrower is not the same as absent: the schema and table names are
+// interpolated into SQL rather than passed as parameters, so they are checked
+// on every path that can reach the database.
+func TestLoadAdminStillValidatesTheDatabase(t *testing.T) {
+	_, err := LoadAdminFrom(env(t,
+		"OUTBOX_DB_USER=outbox", "OUTBOX_DB_NAME=app", `OUTBOX_DB_SCHEMA=public"; DROP TABLE x --`))
+	if err == nil {
+		t.Fatal("an unusable schema identifier was accepted")
+	}
+	if !strings.Contains(err.Error(), "SCHEMA") {
+		t.Errorf("the error does not name the offending variable: %v", err)
+	}
+}

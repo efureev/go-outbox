@@ -19,7 +19,9 @@ func runMigrate(args []string) int {
 		action = args[0]
 	}
 
-	cfg, err := config.Load(".env")
+	// Migrating needs a database and nothing else, so it is not held up by a
+	// routing table it never consults.
+	cfg, err := config.LoadAdmin(".env")
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 

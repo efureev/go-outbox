@@ -43,6 +43,12 @@ func run(args []string) int {
 		return runServer(args)
 	case "migrate":
 		return runMigrate(args)
+	case "failed":
+		return runFailed(args)
+	case "requeue":
+		return runRequeue(args)
+	case "stats":
+		return runStats(args)
 	case "version", "-v", "--version":
 		fmt.Printf("outbox %s (commit %s, built %s)\n", version, commit, date)
 
@@ -108,8 +114,14 @@ Commands:
   run              Start the dispatcher (default)
   migrate up       Apply pending schema migrations
   migrate status   Show which migrations are applied
+  stats            Show the backlog and the configured streams
+  failed           List messages that stopped being retried
+  requeue          Return failed messages to the queue
   version          Print build information
   help             Print this message
+
+  stats, failed and requeue are the admin API's operations over the database
+  connection instead of over HTTP. Pass -h to any of them for its flags.
 
 Configuration is read from the environment and from .env, if present.
 Every variable lives under the OUTBOX_ prefix; see docs/Config.md.

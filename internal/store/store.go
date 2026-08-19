@@ -403,17 +403,20 @@ type Cursor struct {
 	ID        string    `json:"id"`
 }
 
-// ListFailed pages through failed messages in creation order.
+// ListFailed pages through failed messages in creation order, optionally
+// restricted to one stream. An empty stream means every stream.
 //
 // Keyset pagination rather than OFFSET: an offset scan re-reads every skipped
 // row, so paging through a large failure backlog gets slower with every page.
-func (s *Store) ListFailed(ctx context.Context, after Cursor, limit int) ([]FailedMessage, error) {
+func (s *Store) ListFailed(
+	ctx context.Context, after Cursor, limit int, stream string,
+) ([]FailedMessage, error) {
 	id := after.ID
 	if id == "" {
 		id = "00000000-0000-0000-0000-000000000000"
 	}
 
-	rows, err := s.pool.Query(ctx, s.q.listFailed, after.CreatedAt, id, limit)
+	rows, err := s.pool.Query(ctx, s.q.listFailed, after.CreatedAt, id, limit, stream)
 	if err != nil {
 		return nil, fmt.Errorf("list failed: %w", err)
 	}

@@ -256,10 +256,15 @@ const requeueSQL = `SELECT * FROM %[1]s.requeue($1::uuid[])`
 
 const requeueBeforeSQL = `SELECT * FROM %[1]s.requeue_failed_before($1, $2)`
 
+// The stream filter is a predicate on top of the failed index rather than an
+// index of its own. Failed rows are the ones somebody has to look at by hand, so
+// a deployment where that set is large enough for the filter to matter has a
+// problem the index would not fix.
 const listFailedSQL = `
 SELECT id, stream, topic, attempts, coalesce(last_error, ''), created_at
   FROM %[1]s
  WHERE status = 3
+   AND ($4 = '' OR stream = $4)
    AND (created_at, id) > ($1, $2)
  ORDER BY created_at, id
  LIMIT $3`

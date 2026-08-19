@@ -113,17 +113,42 @@ curl -s localhost:8085/api/v1/stats | jq .messages
 
 ### Messages are failing
 
+From a shell inside the container, which is where the binary already is:
+
 ```bash
-curl -s 'localhost:8085/api/v1/messages/failed?limit=20' | jq '.messages[] | {id, topic, attempts, last_error}'
+outbox failed -limit 20
+outbox failed -stream local -json | jq '.messages[] | {id, topic, last_error}'
 ```
 
 `last_error` carries the broker's own words. Once the cause is fixed:
 
 ```bash
+outbox requeue 3b73a835-1aee-45e7-9dc1-36f38ace64e9
+outbox requeue -before 2026-01-01T00:00:00Z -limit 1000
+```
+
+Or over HTTP, for the same operations from somewhere the binary is not:
+
+```bash
+curl -s 'localhost:8085/api/v1/messages/failed?limit=20&stream=local' \
+  | jq '.messages[] | {id, topic, attempts, last_error}'
+
 curl -X POST -H "Authorization: Bearer $TOKEN" \
   localhost:8085/api/v1/messages/requeue \
   -d '{"failed_before":"2026-01-01T00:00:00Z","limit":1000}'
 ```
+
+Both run the same store calls, so neither can become the one that does it
+correctly. What differs is how each is authorised, and deliberately: the
+endpoints need `OUTBOX_HTTP_ADMIN_TOKEN` because anything that can route to the
+pod can call them, while the commands need the database credentials, which is a
+stronger thing to be holding.
+
+The commands also check less of the configuration than the dispatcher does —
+enough to reach the database, and no more. The moment you most need to see what
+stopped is often the moment the routing table is what is wrong, and a tool that
+answers "your broker is misconfigured" to the question "what failed?" is useless
+precisely then.
 
 `outbox_messages_failed_total{reason="permanent"}` rising instead points at
 configuration — an unroutable exchange, an unknown topic, a stream that is not

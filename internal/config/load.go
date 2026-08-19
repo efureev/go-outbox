@@ -25,14 +25,40 @@ func Load(files ...string) (Config, error) {
 		return Config{}, err
 	}
 
-	return decode(env)
+	return decode(env, false)
 }
 
 // LoadFrom builds the configuration from an explicit source. Tests use it to
 // avoid touching the process environment.
-func LoadFrom(src *envi.Env) (Config, error) { return decode(src) }
+func LoadFrom(src *envi.Env) (Config, error) { return decode(src, false) }
 
-func decode(env *envi.Env) (Config, error) {
+// LoadAdmin reads the configuration for a one-shot administrative command,
+// checking only what such a command uses.
+//
+// Listing what stopped and putting it back need a database and nothing else. A
+// dispatcher refuses to start on a broken routing table, and rightly — it cannot
+// deliver. But the moment an operator most needs to see what failed is often the
+// moment the configuration is what is wrong, and a tool that answers "your
+// broker is misconfigured" to the question "what failed?" is useless precisely
+// then.
+//
+// The routing table is still assembled on a best-effort basis, so a command that
+// can show it does, and one reached with a broken table sees an empty one rather
+// than an error.
+func LoadAdmin(files ...string) (Config, error) {
+	env, err := source(files...)
+	if err != nil {
+		return Config{}, err
+	}
+
+	return decode(env, true)
+}
+
+// LoadAdminFrom is LoadAdmin against an explicit source, for the same reason
+// LoadFrom exists.
+func LoadAdminFrom(src *envi.Env) (Config, error) { return decode(src, true) }
+
+func decode(env *envi.Env, adminOnly bool) (Config, error) {
 	var cfg Config
 
 	if err := bind.Decode(env, &cfg, bind.WithPrefix(EnvPrefix)); err != nil {
@@ -47,6 +73,14 @@ func decode(env *envi.Env) (Config, error) {
 
 	if cfg.App.Instance == "" {
 		cfg.App.Instance = defaultInstance()
+	}
+
+	if adminOnly {
+		if err := cfg.validateAdmin(); err != nil {
+			return Config{}, err
+		}
+
+		return cfg, nil
 	}
 
 	if err := cfg.validate(brokerErr); err != nil {
