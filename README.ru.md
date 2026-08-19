@@ -45,6 +45,55 @@
 переотправленное сообщение уходит позже написанных после него. Если потребителю
 нужен порядок в пределах ключа, он обеспечивает его сам.
 
+## Установка
+
+### Образ контейнера
+
+```bash
+docker pull ghcr.io/efureev/go-outbox:1.0.0
+```
+
+Публикуется на каждый тег для `linux/amd64` и `linux/arm64`. Теги: точная
+версия, минорная линия (`1.0`) и `latest`; предрелиз последние два не двигает.
+Образ — это `scratch` плюс набор корневых сертификатов: ни шелла, ни пакетного
+менеджера, ничего, чем мог бы воспользоваться попавший внутрь.
+
+### Бинарник
+
+Готовые архивы для Linux и macOS, amd64 и arm64, на
+[странице релизов](https://github.com/efureev/go-outbox/releases):
+
+```bash
+VERSION=1.0.0
+curl -fsSLO "https://github.com/efureev/go-outbox/releases/download/v$VERSION/outbox_${VERSION}_linux_amd64.tar.gz"
+curl -fsSLO "https://github.com/efureev/go-outbox/releases/download/v$VERSION/SHA256SUMS"
+sha256sum --check --ignore-missing SHA256SUMS
+
+tar -xzf "outbox_${VERSION}_linux_amd64.tar.gz"
+sudo install -m 0755 "outbox_${VERSION}_linux_amd64/outbox" /usr/local/bin/outbox
+outbox version
+```
+
+Бинарник статический: ни рантайма ставить, ни libc подбирать не нужно.
+
+### Через Go
+
+```bash
+go install github.com/efureev/go-outbox/cmd/outbox@latest
+```
+
+Удобно, но версия при этом не штампуется — `outbox version` покажет `dev`. Там,
+где важно знать, что именно развёрнуто, берите архив релиза или образ.
+
+### Из исходников
+
+```bash
+git clone https://github.com/efureev/go-outbox.git && cd go-outbox
+make build              # ./bin/outbox
+make image              # локальный образ контейнера
+make dist               # архивы релиза под все платформы
+```
+
 ## Быстрый старт
 
 ```bash
@@ -139,6 +188,9 @@ SELECT outbox.requeue(ARRAY['…']::uuid[]);
 
 ## Документация
 
+- [Сценарии использования](docs/UseCases.ru.md) — готовые рецепты: Laravel под
+  Docker, VDS с supervisord, Kubernetes с автомасштабированием, bare metal с
+  systemd.
 - [Публичный контракт](docs/PublicContract.ru.md) — какие колонки пишет
   продюсер, правила маршрутизации и что явно не гарантируется.
 - [Конфигурация](docs/Config.ru.md) — все переменные окружения.

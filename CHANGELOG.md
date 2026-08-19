@@ -118,6 +118,17 @@ are deliberate: they turn a burst of inserts into a couple of claims and keep re
 waking at the same millisecond. Trading them away takes delivery to roughly five milliseconds, at
 the cost of both properties.
 
+### Distribution
+
+- **Container image** on `ghcr.io/efureev/go-outbox`, built for `linux/amd64` and
+  `linux/arm64` on every tag. The Dockerfile cross-compiles rather than emulating, so a
+  multi-platform build needs no QEMU.
+- **Prebuilt archives** for Linux and macOS, amd64 and arm64, with `SHA256SUMS`, attached to the
+  GitHub release. The release notes are the changelog entry for the version, so the two cannot
+  drift.
+- **`go install github.com/efureev/go-outbox/cmd/outbox@latest`** for anyone who has Go, though it
+  stamps no version.
+
 ### Requirements
 
 - Go 1.26

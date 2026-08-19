@@ -1,0 +1,104 @@
+# Publishing, on a tag.
+#
+# Deliberately built from two actions and a shell rather than from a stack of
+# third-party actions: every one of those is a major version to track, and a
+# release pipeline that breaks is discovered at the worst possible moment. The
+# `gh` CLI and `docker buildx` are preinstalled on GitHub runners.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  binaries:
+    name: Binaries
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write          # to create the release
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0       # tags, so the build stamps a real version
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      # The same target a developer runs, so what ships is what was tested.
+      - name: Cross-compile
+        run: make dist VERSION="${GITHUB_REF_NAME#v}"
+
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+
+          # The changelog entry for this version becomes the release notes, so
+          # the two cannot drift.
+          notes=$(awk -v v="$version" \
+            '$0 == "## [" v "]" || index($0, "## [" v "] ") == 1 {f=1; next} /^## \[/ {f=0} f' \
+            CHANGELOG.md)
+
+          if [ -z "${notes// /}" ]; then
+            echo "::warning::no CHANGELOG entry for $version"
+            notes="See CHANGELOG.md."
+          fi
+
+          prerelease=""
+          case "$version" in
+            *-*) prerelease="--prerelease" ;;
+          esac
+
+          gh release create "$GITHUB_REF_NAME" \
+            --title "$GITHUB_REF_NAME" \
+            --notes "$notes" \
+            $prerelease \
+            dist/*.tar.gz dist/SHA256SUMS
+
+  image:
+    name: Image
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write          # to push to ghcr.io
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Log in to the registry
+        run: |
+          echo "${{ github.token }}" \
+            | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+
+      # No QEMU step: the Dockerfile pins both of its builder stages to the
+      # build platform and cross-compiles, so nothing is ever emulated.
+      - name: Build and push
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          # GHCR insists on a lower-case path, and ${var,,} would tie this to
+          # bash 4 — true on the runner, false on a developer's macOS.
+          image="ghcr.io/$(printf '%s' "$GITHUB_REPOSITORY" | tr '[:upper:]' '[:lower:]')"
+
+          tags="--tag $image:$version"
+          case "$version" in
+            *-*) ;;                                   # a pre-release moves no floating tag
+            *)   tags="$tags --tag $image:${version%.*} --tag $image:latest" ;;
+          esac
+
+          # The default builder cannot do multi-platform; this driver can.
+          docker buildx create --use --driver docker-container --name release
+
+          docker buildx build \
+            --platform linux/amd64,linux/arm64 \
+            --build-arg VERSION="$version" \
+            --build-arg COMMIT="${GITHUB_SHA::7}" \
+            --build-arg BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            $tags \
+            --push .

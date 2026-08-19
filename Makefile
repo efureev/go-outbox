@@ -7,6 +7,11 @@ COVERAGE   ?= coverage.out
 # rebuilding fixtures for tiny values of b.N. The two suites need very different
 # counts — a throughput iteration is one message among thousands in flight, a
 # latency iteration is one message waited on from end to end.
+# Release artefacts. A daemon's home is Linux; the macOS builds are for running
+# it on a developer's own machine.
+DIST      ?= dist
+PLATFORMS ?= linux/amd64 linux/arm64 darwin/amd64 darwin/arm64
+
 BENCHTIME     ?= 3000x
 BENCHLATENCY  ?= 200x
 BENCHCOUNT    ?= 3
@@ -15,13 +20,14 @@ COMMIT     ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo none)
 BUILD_DATE ?= $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
 
 MODULE  := github.com/efureev/go-outbox
+IMAGE   ?= ghcr.io/efureev/go-outbox
 LDFLAGS := -s -w \
 	-X 'main.version=$(VERSION)' \
 	-X 'main.commit=$(COMMIT)' \
 	-X 'main.date=$(BUILD_DATE)'
 
 .DEFAULT_GOAL := help
-.PHONY: help build run test test-integration test-all bench bench-throughput bench-latency cover lint lint-host fmt fmt-host tidy up down logs psql image clean clean-cache
+.PHONY: help build run test test-integration test-all bench bench-throughput bench-latency dist cover lint lint-host fmt fmt-host tidy up down logs psql image clean clean-cache
 
 help: ## List the available targets
 	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z_-]+:.*?## / {printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -101,15 +107,30 @@ logs: ## Follow the container logs
 psql: ## Open a psql shell on the development database
 	docker compose exec postgres psql -U outbox -d outbox
 
+dist: ## Cross-compile the release archives into dist/
+	@rm -rf "$(DIST)" && mkdir -p "$(DIST)"
+	@for platform in $(PLATFORMS); do \
+		os=$${platform%/*}; arch=$${platform#*/}; \
+		name="outbox_$(VERSION)_$${os}_$${arch}"; \
+		printf '  %s\n' "$$platform"; \
+		CGO_ENABLED=0 GOOS=$$os GOARCH=$$arch \
+			go build -trimpath -ldflags "$(LDFLAGS)" -o "$(DIST)/$$name/outbox" ./cmd/outbox || exit 1; \
+		cp LICENSE README.md "$(DIST)/$$name/"; \
+		tar -czf "$(DIST)/$$name.tar.gz" -C "$(DIST)" "$$name"; \
+		rm -rf "$(DIST)/$$name"; \
+	done
+	@cd "$(DIST)" && { command -v sha256sum >/dev/null && sha256sum *.tar.gz || shasum -a 256 *.tar.gz; } > SHA256SUMS
+	@ls -1 "$(DIST)"
+
 image: ## Build the container image
 	docker build \
 		--build-arg VERSION=$(VERSION) \
 		--build-arg COMMIT=$(COMMIT) \
 		--build-arg BUILD_DATE=$(BUILD_DATE) \
-		-t go-outbox:$(VERSION) .
+		-t $(IMAGE):$(VERSION) .
 
 clean: ## Remove build artefacts
-	rm -rf bin $(COVERAGE)
+	rm -rf bin $(DIST) $(COVERAGE)
 
 clean-cache: ## Remove the lint container's caches
 	rm -rf "$(LINT_CACHE)"

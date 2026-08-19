@@ -40,6 +40,55 @@ What it does **not** guarantee is ordering. Several replicas publish
 concurrently, and a retried message lands after messages written later. If a
 consumer needs per-key ordering it has to establish it itself.
 
+## Install
+
+### Container image
+
+```bash
+docker pull ghcr.io/efureev/go-outbox:1.0.0
+```
+
+Published on every tag for `linux/amd64` and `linux/arm64`. Tags are the exact
+version, the minor line (`1.0`), and `latest`; a pre-release moves neither of
+the last two. The image is `scratch` plus a CA bundle — no shell, no package
+manager, nothing for anything that gets in to use.
+
+### Binary
+
+Prebuilt archives for Linux and macOS, amd64 and arm64, on
+[the releases page](https://github.com/efureev/go-outbox/releases):
+
+```bash
+VERSION=1.0.0
+curl -fsSLO "https://github.com/efureev/go-outbox/releases/download/v$VERSION/outbox_${VERSION}_linux_amd64.tar.gz"
+curl -fsSLO "https://github.com/efureev/go-outbox/releases/download/v$VERSION/SHA256SUMS"
+sha256sum --check --ignore-missing SHA256SUMS
+
+tar -xzf "outbox_${VERSION}_linux_amd64.tar.gz"
+sudo install -m 0755 "outbox_${VERSION}_linux_amd64/outbox" /usr/local/bin/outbox
+outbox version
+```
+
+The binary is static: no runtime to install, no libc to match.
+
+### With Go
+
+```bash
+go install github.com/efureev/go-outbox/cmd/outbox@latest
+```
+
+Convenient, but it stamps no version — `outbox version` reports `dev`. Prefer a
+release archive or the image where knowing what is deployed matters.
+
+### From source
+
+```bash
+git clone https://github.com/efureev/go-outbox.git && cd go-outbox
+make build              # ./bin/outbox
+make image              # a local container image
+make dist               # release archives for every platform
+```
+
 ## Quick start
 
 ```bash
@@ -133,6 +182,8 @@ Metrics and starting alert rules: [docs/MetricsAndAlerts.md](docs/MetricsAndAler
 
 ## Documentation
 
+- [Use cases](docs/UseCases.md) — complete recipes: Laravel under Docker, a VDS
+  with supervisord, Kubernetes with autoscaling, bare metal with systemd.
 - [Public contract](docs/PublicContract.md) — the columns a producer writes, the
   routing rules, and what is explicitly not guaranteed.
 - [Configuration](docs/Config.md) — every environment variable.
