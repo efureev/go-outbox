@@ -13,6 +13,7 @@ transaction as the business change**. Everything else here is plumbing.
 - [2. One VDS, supervisord](#2-one-vds-supervisord)
 - [3. Kubernetes, Kafka, autoscaled on backlog age](#3-kubernetes-kafka-autoscaled-on-backlog-age)
 - [4. Bare metal, systemd, several instances on one host](#4-bare-metal-systemd-several-instances-on-one-host)
+- [5. Four streams across three RabbitMQ instances](#5-four-streams-across-three-rabbitmq-instances)
 
 ---
 
@@ -552,6 +553,94 @@ claim over more messages, until a batch stops fitting inside the lease.
   the second instance fails to bind and restarts forever.
 - **Instances that all look alike in metrics.** Set `OUTBOX_APP_INSTANCE`, or
   the `owner` column cannot tell you which process is sitting on a stuck lease.
+
+---
+
+## 5. Four streams across three RabbitMQ instances
+
+Not a deployment target but a routing arrangement: one dispatcher feeding several
+brokers at once. A driver is one connection, and there may be as many as there are
+brokers to reach — so separating environments, tenants or blast radius is a matter
+of configuration.
+
+Here `local` and `tetra` share an instance through drivers of their own, `test` and
+`global` each get one to themselves.
+
+```dotenv
+OUTBOX_STREAMS=local,test,global,tetra
+
+OUTBOX_STREAM_LOCAL_DRIVER=rmq_local
+OUTBOX_STREAM_TEST_DRIVER=rmq_test
+OUTBOX_STREAM_GLOBAL_DRIVER=rmq_global
+OUTBOX_STREAM_TETRA_DRIVER=rmq_tetra
+
+OUTBOX_DRIVER_RMQ_LOCAL_TYPE=rabbitmq
+OUTBOX_DRIVER_RMQ_LOCAL_DSN=amqp://user:pass@rabbit-a:5672/
+OUTBOX_DRIVER_RMQ_LOCAL_PREFIX=loc
+
+OUTBOX_DRIVER_RMQ_TEST_TYPE=rabbitmq
+OUTBOX_DRIVER_RMQ_TEST_DSN=amqp://user:pass@rabbit-b:5672/
+OUTBOX_DRIVER_RMQ_TEST_PREFIX=tst
+
+OUTBOX_DRIVER_RMQ_GLOBAL_TYPE=rabbitmq
+OUTBOX_DRIVER_RMQ_GLOBAL_DSN=amqp://user:pass@rabbit-c:5672/
+OUTBOX_DRIVER_RMQ_GLOBAL_PREFIX=glb
+
+# Back to the first instance, but a driver of its own: a separate connection, its
+# own channel pool, its own naming.
+OUTBOX_DRIVER_RMQ_TETRA_TYPE=rabbitmq
+OUTBOX_DRIVER_RMQ_TETRA_DSN=amqp://user:pass@rabbit-a:5672/
+OUTBOX_DRIVER_RMQ_TETRA_PREFIX=ttr
+```
+
+A producer picks its destination with one column:
+
+```sql
+INSERT INTO outbox.messages (id, stream, topic, payload, target)
+VALUES (gen_random_uuid(), 'tetra', 'orders.placed', convert_to('{}', 'UTF8'), '{}');
+```
+
+which lands where the prefix says it will:
+
+| Stream | Driver | Instance | Queue |
+|---|---|---|---|
+| `local` | `rmq_local` | rabbit-a | `loc_orders.placed` |
+| `test` | `rmq_test` | rabbit-b | `tst_orders.placed` |
+| `global` | `rmq_global` | rabbit-c | `glb_orders.placed` |
+| `tetra` | `rmq_tetra` | rabbit-a | `ttr_orders.placed` |
+
+`GET /api/v1/stats` reports the mapping as it was actually parsed, which is the
+quickest way to confirm a stream reaches the instance you meant.
+
+### Trying it locally
+
+```yaml
+services:
+  rabbit-a: {image: rabbitmq:4-alpine, ports: ["55672:5672"]}
+  rabbit-b: {image: rabbitmq:4-alpine, ports: ["55673:5672"]}
+  rabbit-c: {image: rabbitmq:4-alpine, ports: ["55674:5672"]}
+```
+
+Point the three DSNs at `localhost:55672`, `:55673` and `:55674`, insert one message
+per stream, and each instance ends up holding exactly its own.
+
+### What goes wrong here
+
+- **Counting connections once instead of per driver.** `CHANNELS` and the publish
+  concurrency belong to a driver, not to the process. Four drivers at the default
+  four channels is sixteen AMQP channels, and `OUTBOX_DISPATCH_WORKERS` applies to
+  every stream's pipeline separately.
+- **A driver name that is a prefix of another.** `rmq` alongside `rmq_local` is
+  handled — settings are matched by exact key, not by string prefix — but it reads
+  badly. Give drivers names that do not nest.
+- **Assuming one broker being down is contained.** It is, for delivery: each stream
+  has its own pipeline, so the others keep publishing. It is not contained for the
+  table, which keeps growing while that stream's messages retry. Watch
+  `outbox_oldest_pending_age_seconds`, which is per deployment, alongside
+  `outbox_messages_retried_total{stream=…}`, which is not.
+- **Forgetting that a prefix is part of the consumer contract.** Change
+  `OUTBOX_DRIVER_*_PREFIX` and every consumer of that stream is subscribed to a queue
+  nobody publishes to any more.
 
 ---
 

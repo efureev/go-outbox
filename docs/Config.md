@@ -67,6 +67,54 @@ is a startup error, not a setting that silently does nothing — and a driver
 whose name is a prefix of another (`rmq` and `rmq_local`) reads only its own
 variables.
 
+### Several brokers of the same kind
+
+Nothing ties a driver to a broker *type* — a driver is one connection, and there
+may be as many as there are brokers to reach. Four streams across three separate
+RabbitMQ instances:
+
+```dotenv
+OUTBOX_STREAMS=local,test,global,tetra
+
+OUTBOX_STREAM_LOCAL_DRIVER=rmq_local
+OUTBOX_STREAM_TEST_DRIVER=rmq_test
+OUTBOX_STREAM_GLOBAL_DRIVER=rmq_global
+OUTBOX_STREAM_TETRA_DRIVER=rmq_tetra
+
+OUTBOX_DRIVER_RMQ_LOCAL_TYPE=rabbitmq
+OUTBOX_DRIVER_RMQ_LOCAL_DSN=amqp://user:pass@rabbit-a:5672/
+OUTBOX_DRIVER_RMQ_LOCAL_PREFIX=loc
+
+OUTBOX_DRIVER_RMQ_TEST_TYPE=rabbitmq
+OUTBOX_DRIVER_RMQ_TEST_DSN=amqp://user:pass@rabbit-b:5672/
+OUTBOX_DRIVER_RMQ_TEST_PREFIX=tst
+
+OUTBOX_DRIVER_RMQ_GLOBAL_TYPE=rabbitmq
+OUTBOX_DRIVER_RMQ_GLOBAL_DSN=amqp://user:pass@rabbit-c:5672/
+OUTBOX_DRIVER_RMQ_GLOBAL_PREFIX=glb
+
+# Back to the first instance, but a driver of its own: a separate connection,
+# its own channel pool and its own naming.
+OUTBOX_DRIVER_RMQ_TETRA_TYPE=rabbitmq
+OUTBOX_DRIVER_RMQ_TETRA_DSN=amqp://user:pass@rabbit-a:5672/
+OUTBOX_DRIVER_RMQ_TETRA_PREFIX=ttr
+```
+
+A producer then picks its destination with one column:
+
+```sql
+INSERT INTO outbox.messages (id, stream, topic, payload, target)
+VALUES (gen_random_uuid(), 'tetra', 'orders.placed', convert_to('{}', 'UTF8'), '{}');
+```
+
+Two consequences worth knowing. Each stream gets a pipeline of its own, so an
+instance that is down delays only the streams pointed at it — the rest keep
+publishing. And each driver holds its own connection and channel pool, so
+`CHANNELS` and the publish concurrency are per driver, not shared.
+
+`GET /api/v1/stats` lists the mapping as configured, which is the quickest way
+to confirm a stream reaches the instance you meant.
+
 ### Common to every driver
 
 | Key | Default | Meaning |

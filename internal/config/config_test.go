@@ -218,3 +218,74 @@ func TestDLQStreamMustExist(t *testing.T) {
 		t.Fatalf("want a complaint about the unknown DLQ stream, got: %v", err)
 	}
 }
+
+// Several drivers of the same type, each its own connection: the routing
+// arrangement behind "publish to four streams across three RabbitMQ instances".
+func TestSeveralBrokersOfTheSameType(t *testing.T) {
+	cfg, err := LoadFrom(env(t,
+		"OUTBOX_DB_USER=outbox",
+		"OUTBOX_DB_NAME=app",
+		"OUTBOX_STREAMS=local,test,global,tetra",
+
+		"OUTBOX_STREAM_LOCAL_DRIVER=rmq_local",
+		"OUTBOX_STREAM_TEST_DRIVER=rmq_test",
+		"OUTBOX_STREAM_GLOBAL_DRIVER=rmq_global",
+		"OUTBOX_STREAM_TETRA_DRIVER=rmq_tetra",
+
+		"OUTBOX_DRIVER_RMQ_LOCAL_TYPE=rabbitmq",
+		"OUTBOX_DRIVER_RMQ_LOCAL_DSN=amqp://a:5672/",
+		"OUTBOX_DRIVER_RMQ_LOCAL_PREFIX=loc",
+
+		"OUTBOX_DRIVER_RMQ_TEST_TYPE=rabbitmq",
+		"OUTBOX_DRIVER_RMQ_TEST_DSN=amqp://b:5672/",
+		"OUTBOX_DRIVER_RMQ_TEST_PREFIX=tst",
+
+		"OUTBOX_DRIVER_RMQ_GLOBAL_TYPE=rabbitmq",
+		"OUTBOX_DRIVER_RMQ_GLOBAL_DSN=amqp://c:5672/",
+		"OUTBOX_DRIVER_RMQ_GLOBAL_PREFIX=glb",
+
+		// Back to the first instance, but a driver of its own.
+		"OUTBOX_DRIVER_RMQ_TETRA_TYPE=rabbitmq",
+		"OUTBOX_DRIVER_RMQ_TETRA_DSN=amqp://a:5672/",
+		"OUTBOX_DRIVER_RMQ_TETRA_PREFIX=ttr",
+	))
+	if err != nil {
+		t.Fatalf("LoadFrom: %v", err)
+	}
+
+	if got := len(cfg.Brokers.Streams); got != 4 {
+		t.Errorf("%d streams configured, want 4", got)
+	}
+	if got := len(cfg.Brokers.Drivers); got != 4 {
+		t.Errorf("%d drivers built, want 4 — one connection each", got)
+	}
+
+	// Every stream reaches the instance it names, with the naming that belongs
+	// to that driver and no other.
+	for _, want := range []struct{ stream, driver, dsn, prefix string }{
+		{"local", "rmq_local", "amqp://a:5672/", "loc"},
+		{"test", "rmq_test", "amqp://b:5672/", "tst"},
+		{"global", "rmq_global", "amqp://c:5672/", "glb"},
+		{"tetra", "rmq_tetra", "amqp://a:5672/", "ttr"},
+	} {
+		driver, ok := cfg.Brokers.DriverFor(want.stream)
+		if !ok || driver != want.driver {
+			t.Errorf("stream %q resolves to driver %q, want %q", want.stream, driver, want.driver)
+
+			continue
+		}
+
+		d, ok := cfg.Brokers.Drivers[driver].(*RabbitMQDriver)
+		if !ok {
+			t.Errorf("driver %q is %T, want *RabbitMQDriver", driver, cfg.Brokers.Drivers[driver])
+
+			continue
+		}
+		if d.DSN != want.dsn {
+			t.Errorf("driver %q points at %q, want %q", driver, d.DSN, want.dsn)
+		}
+		if got := d.Naming().Prefix; got != want.prefix {
+			t.Errorf("driver %q uses prefix %q, want %q", driver, got, want.prefix)
+		}
+	}
+}

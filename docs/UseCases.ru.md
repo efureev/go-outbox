@@ -13,6 +13,7 @@
 - [2. Один VDS, supervisord](#2-один-vds-supervisord)
 - [3. Kubernetes, Kafka, автомасштабирование по возрасту backlog'а](#3-kubernetes-kafka-автомасштабирование-по-возрасту-backlogа)
 - [4. Bare metal, systemd, несколько инстансов на одной машине](#4-bare-metal-systemd-несколько-инстансов-на-одной-машине)
+- [5. Четыре стрима на трёх инстансах RabbitMQ](#5-четыре-стрима-на-трёх-инстансах-rabbitmq)
 
 ---
 
@@ -555,6 +556,94 @@ make up && make bench
   второй инстанс не сможет занять порт и будет перезапускаться бесконечно.
 - **Инстансы, неразличимые в метриках.** Задайте `OUTBOX_APP_INSTANCE`, иначе
   колонка `owner` не подскажет, какой процесс сидит на зависшем lease.
+
+---
+
+## 5. Четыре стрима на трёх инстансах RabbitMQ
+
+Это не цель развёртывания, а схема маршрутизации: один диспетчер кормит сразу
+несколько брокеров. Драйвер — это одно соединение, и их может быть столько, сколько
+брокеров нужно достать, так что разделение окружений, арендаторов или радиуса
+поражения — вопрос конфигурации.
+
+Здесь `local` и `tetra` делят один инстанс, но каждый своим драйвером, а `test` и
+`global` получают по инстансу целиком.
+
+```dotenv
+OUTBOX_STREAMS=local,test,global,tetra
+
+OUTBOX_STREAM_LOCAL_DRIVER=rmq_local
+OUTBOX_STREAM_TEST_DRIVER=rmq_test
+OUTBOX_STREAM_GLOBAL_DRIVER=rmq_global
+OUTBOX_STREAM_TETRA_DRIVER=rmq_tetra
+
+OUTBOX_DRIVER_RMQ_LOCAL_TYPE=rabbitmq
+OUTBOX_DRIVER_RMQ_LOCAL_DSN=amqp://user:pass@rabbit-a:5672/
+OUTBOX_DRIVER_RMQ_LOCAL_PREFIX=loc
+
+OUTBOX_DRIVER_RMQ_TEST_TYPE=rabbitmq
+OUTBOX_DRIVER_RMQ_TEST_DSN=amqp://user:pass@rabbit-b:5672/
+OUTBOX_DRIVER_RMQ_TEST_PREFIX=tst
+
+OUTBOX_DRIVER_RMQ_GLOBAL_TYPE=rabbitmq
+OUTBOX_DRIVER_RMQ_GLOBAL_DSN=amqp://user:pass@rabbit-c:5672/
+OUTBOX_DRIVER_RMQ_GLOBAL_PREFIX=glb
+
+# Снова первый инстанс, но отдельным драйвером: своё соединение, свой пул каналов,
+# своё именование.
+OUTBOX_DRIVER_RMQ_TETRA_TYPE=rabbitmq
+OUTBOX_DRIVER_RMQ_TETRA_DSN=amqp://user:pass@rabbit-a:5672/
+OUTBOX_DRIVER_RMQ_TETRA_PREFIX=ttr
+```
+
+Продюсер выбирает направление одной колонкой:
+
+```sql
+INSERT INTO outbox.messages (id, stream, topic, payload, target)
+VALUES (gen_random_uuid(), 'tetra', 'orders.placed', convert_to('{}', 'UTF8'), '{}');
+```
+
+и сообщение приходит туда, куда указывает префикс:
+
+| Стрим | Драйвер | Инстанс | Очередь |
+|---|---|---|---|
+| `local` | `rmq_local` | rabbit-a | `loc_orders.placed` |
+| `test` | `rmq_test` | rabbit-b | `tst_orders.placed` |
+| `global` | `rmq_global` | rabbit-c | `glb_orders.placed` |
+| `tetra` | `rmq_tetra` | rabbit-a | `ttr_orders.placed` |
+
+`GET /api/v1/stats` показывает разобранное сопоставление — самый быстрый способ
+убедиться, что стрим уходит в тот инстанс, который вы имели в виду.
+
+### Попробовать локально
+
+```yaml
+services:
+  rabbit-a: {image: rabbitmq:4-alpine, ports: ["55672:5672"]}
+  rabbit-b: {image: rabbitmq:4-alpine, ports: ["55673:5672"]}
+  rabbit-c: {image: rabbitmq:4-alpine, ports: ["55674:5672"]}
+```
+
+Направьте три DSN на `localhost:55672`, `:55673` и `:55674`, вставьте по сообщению
+на стрим — и каждый инстанс получит ровно своё.
+
+### Что здесь ломается
+
+- **Счёт соединений разом, а не по драйверам.** `CHANNELS` и параллелизм публикации
+  принадлежат драйверу, а не процессу. Четыре драйвера по четыре канала — это
+  шестнадцать AMQP-каналов, а `OUTBOX_DISPATCH_WORKERS` применяется к пайплайну
+  каждого стрима отдельно.
+- **Имя драйвера, являющееся префиксом другого.** `rmq` рядом с `rmq_local`
+  обрабатывается корректно — настройки сопоставляются по точному ключу, а не по
+  префиксу строки, — но читается плохо. Давайте драйверам невложенные имена.
+- **Уверенность, что падение одного брокера локализовано.** Для доставки — да: у
+  каждого стрима свой пайплайн, остальные продолжают публиковаться. Для таблицы —
+  нет: она растёт, пока сообщения этого стрима переотправляются. Смотрите
+  `outbox_oldest_pending_age_seconds`, которая одна на развёртывание, вместе с
+  `outbox_messages_retried_total{stream=…}`, которая — нет.
+- **Забытое, что префикс — часть контракта с потребителем.** Смените
+  `OUTBOX_DRIVER_*_PREFIX`, и все потребители этого стрима окажутся подписаны на
+  очередь, в которую больше никто не публикует.
 
 ---
 
