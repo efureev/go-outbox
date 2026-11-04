@@ -6,6 +6,27 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.8.1] — 2026-11-04
+
+Nothing changes in how messages are delivered. This closes what the 1.8.0 update left open.
+
+### Fixed
+
+- **CI and the release no longer depend on how the `go` line is written.** `setup-go` reads that
+  line as a semver range: `go 1.27` means the newest patch and `go 1.27.0` means exactly that one,
+  whatever `check-latest` says. The `go` command rewrites the first form into the second as soon as
+  a dependency declares a three-part version, which would have pinned CI and the release builds to
+  the first patch of the series. The workflows now take the release line from `go.mod` themselves.
+
+### Changed
+
+- **Spans declare OpenTelemetry schema 1.43.0 rather than 1.26.0.** The six attributes the
+  dispatcher takes from the conventions keep their names, so only the resource's schema URL moves.
+- **Redpanda is pinned to v26.2.6** in CI and in the compose stack, where it was the one thing
+  still floating on `latest`.
+- **Every job names its runner image, `ubuntu-26.04`,** rather than following `ubuntu-latest`,
+  which GitHub is moving to that image anyway.
+
 ## [1.8.0] — 2026-11-04
 
 No new features: the toolchain, the dependencies and the release tooling, brought up to date.
@@ -24,6 +45,16 @@ No new features: the toolchain, the dependencies and the release tooling, brough
 - Go 1.27
 - PostgreSQL 13 or newer
 - RabbitMQ 3.8+ and/or Kafka 2.4+
+
+## [1.7.1] — 2026-08-19
+
+No code changes.
+
+### Changed
+
+- **`docs/TestGaps` is retired,** its eight items done. Why each surviving mutant is not worth
+  killing now sits in the test file for its package, and the reasoning about coverage moved to both
+  READMEs, which also list `make mutation` now.
 
 ## [1.7.0] — 2026-08-19
 
