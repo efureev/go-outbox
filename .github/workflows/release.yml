@@ -17,10 +17,12 @@ on:
 permissions:
   contents: read
 
+# The runner image is named rather than left at ubuntu-latest: that label moves on
+# GitHub's schedule, and this pipeline should change what it runs on in a commit.
 jobs:
   binaries:
     name: Binaries
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     permissions:
       contents: write          # to create the release
       id-token: write          # to get a signing certificate from Fulcio
@@ -29,16 +31,7 @@ jobs:
         with:
           fetch-depth: 0       # tags, so the build stamps a real version
 
-      - uses: actions/setup-go@v7
-        with:
-          go-version-file: go.mod
-          cache: true
-          # Which patch release builds the binaries must not be left to whatever
-          # the runner had cached. A standard library advisory is fixed by a
-          # patch, so without this a release can ship with known-vulnerable
-          # crypto/tls on a day the cache happened to be stale — and nothing in
-          # this pipeline would say so.
-          check-latest: true
+      - uses: ./.github/actions/setup-go
 
       # The same target a developer runs, so what ships is what was tested.
       # SBOM=1 additionally writes a CycloneDX document per binary, describing
@@ -105,7 +98,7 @@ jobs:
 
   image:
     name: Image
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     permissions:
       contents: read
       packages: write          # to push to ghcr.io
