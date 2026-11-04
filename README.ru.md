@@ -317,7 +317,7 @@ make fmt
 
 ## Требования
 
-- Go 1.26
+- Go 1.27
 - PostgreSQL 13 или новее
 - RabbitMQ 3.8+ и/или Kafka 2.4+
 

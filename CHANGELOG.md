@@ -6,6 +6,15 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- **Go 1.27 is now required,** by the module and by the image's builder. This reaches past the
+  dispatcher: a service importing `pkg/outboxclient` or `pkg/outboxsql` needs 1.27 as well.
+- **Dependencies brought up to date:** pgx 5.12, amqp091-go 1.16, the Prometheus client 1.25 and
+  OpenTelemetry 1.47, with their transitive updates.
+- **Tooling brought up to date:** golangci-lint 2.15, cosign 3.1.4, govulncheck 1.9.0 and
+  cyclonedx-gomod 1.12.
+
 ## [1.7.0] — 2026-08-19
 
 No new features. This one is about whether the previous six releases do what they say, and the

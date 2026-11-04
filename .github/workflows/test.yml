@@ -81,7 +81,7 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
-          # go.mod says "go 1.26", and without this the action takes whatever
+          # go.mod says "go 1.27", and without this the action takes whatever
           # patch the runner happens to have cached. That is how a run went
           # green on 1.26.6 and red on 1.26.5 with the same code: the standard
           # library's own advisories are fixed by a patch release, so which one
@@ -102,4 +102,4 @@ jobs:
           check-latest: true
       - uses: golangci/golangci-lint-action@v9
         with:
-          version: v2.12
+          version: v2.15
