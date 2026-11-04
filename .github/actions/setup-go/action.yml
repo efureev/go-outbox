@@ -1,0 +1,39 @@
+# Installs the newest patch of the Go release line that go.mod names.
+#
+# Reading the line here rather than through setup-go's go-version-file is the
+# point of this action. setup-go treats the go line as a semver range: `go 1.27`
+# resolves to the newest 1.27.x, `go 1.27.0` resolves to exactly 1.27.0, and
+# check-latest changes neither. The go command rewrites the first form into the
+# second as soon as a dependency declares a three-part version, so a `go get -u`
+# would otherwise pin CI and the release builds to the first patch of the series,
+# with no change to any workflow to show for it.
+#
+# Which patch runs matters because the standard library's own advisories are
+# fixed by patch releases. check-latest stays for the same reason: without it the
+# action takes whatever patch the runner happens to have cached, which is how the
+# same commit once went green on 1.26.6 and red on 1.26.5, and how a release could
+# ship a known-vulnerable crypto/tls on a day the cache happened to be stale.
+name: Set up Go
+description: Installs the newest patch of the Go release line named in go.mod.
+
+runs:
+  using: composite
+  steps:
+    - id: line
+      shell: bash
+      run: |
+        set -euo pipefail
+        line=$(sed -nE 's/^go ([0-9]+\.[0-9]+).*/\1/p' go.mod)
+        # An empty version is not an error to setup-go: it would quietly use
+        # whatever Go the runner came with.
+        if [ -z "$line" ]; then
+          echo "::error file=go.mod::no go line to take the version from"
+          exit 1
+        fi
+        echo "version=$line" >> "$GITHUB_OUTPUT"
+
+    - uses: actions/setup-go@v7
+      with:
+        go-version: ${{ steps.line.outputs.version }}
+        cache: true
+        check-latest: true

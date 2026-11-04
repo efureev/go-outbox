@@ -5,9 +5,11 @@ on:
     branches: [main]
   pull_request:
 
+# The runner image is named rather than left at ubuntu-latest: that label moves on
+# GitHub's schedule, and this pipeline should change what it runs on in a commit.
 jobs:
   test:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
 
     services:
       postgres:
@@ -34,18 +36,14 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: actions/setup-go@v7
-        with:
-          go-version-file: go.mod
-          cache: true
-          check-latest: true
+      - uses: ./.github/actions/setup-go
 
       # Redpanda is not a GitHub service container: it needs arguments, and a
       # service container cannot take a command.
       - name: Start Redpanda
         run: |
           docker run -d --name redpanda -p 19092:19092 \
-            docker.redpanda.com/redpandadata/redpanda:latest \
+            docker.redpanda.com/redpandadata/redpanda:v26.2.6 \
             redpanda start --smp=1 --memory=1G --mode=dev-container \
               --kafka-addr=external://0.0.0.0:19092 \
               --advertise-kafka-addr=external://localhost:19092
@@ -74,32 +72,20 @@ jobs:
   # only by whoever is looking at a red test run.
   vuln:
     name: Vulnerabilities
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-go@v7
-        with:
-          go-version-file: go.mod
-          cache: true
-          # go.mod says "go 1.27", and without this the action takes whatever
-          # patch the runner happens to have cached. That is how a run went
-          # green on 1.26.6 and red on 1.26.5 with the same code: the standard
-          # library's own advisories are fixed by a patch release, so which one
-          # you get decides whether govulncheck has anything to report.
-          check-latest: true
+      - uses: ./.github/actions/setup-go
       # The same target a developer runs. govulncheck reports only the
       # vulnerabilities the code actually reaches, so a finding here is one
       # somebody has to act on rather than a line in an advisory feed.
       - run: make vuln
 
   lint:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-go@v7
-        with:
-          go-version-file: go.mod
-          check-latest: true
+      - uses: ./.github/actions/setup-go
       - uses: golangci/golangci-lint-action@v9
         with:
           version: v2.15

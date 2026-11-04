@@ -32,8 +32,9 @@ services:
       timeout: 5s
       retries: 15
 
+  # Keep this tag and the one in .github/workflows/test.yml the same.
   redpanda:
-    image: docker.redpanda.com/redpandadata/redpanda:latest
+    image: docker.redpanda.com/redpandadata/redpanda:v26.2.6
     command:
       - redpanda
       - start
