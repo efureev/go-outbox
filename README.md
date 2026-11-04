@@ -310,7 +310,7 @@ with the reason it is not worth killing; most are equivalent.
 
 ## Requirements
 
-- Go 1.26
+- Go 1.27
 - PostgreSQL 13 or newer
 - RabbitMQ 3.8+ and/or Kafka 2.4+
 

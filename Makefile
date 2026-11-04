@@ -20,8 +20,8 @@ SBOM      ?= 0
 # changes what it runs without a commit is a release pipeline that breaks on
 # somebody else's schedule. govulncheck reads its vulnerability database over
 # the network at run time, so pinning the tool does not pin the findings.
-GOVULNCHECK ?= golang.org/x/vuln/cmd/govulncheck@v1.7.0
-CYCLONEDX   ?= github.com/CycloneDX/cyclonedx-gomod/cmd/cyclonedx-gomod@v1.11.0
+GOVULNCHECK ?= golang.org/x/vuln/cmd/govulncheck@v1.9.0
+CYCLONEDX   ?= github.com/CycloneDX/cyclonedx-gomod/cmd/cyclonedx-gomod@v1.12.0
 
 BENCHTIME     ?= 3000x
 BENCHLATENCY  ?= 200x

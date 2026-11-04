@@ -5,7 +5,7 @@
 # and the Go build cross-compiles from there. Without it, buildx would emulate
 # the target through QEMU to run a native compile — minutes instead of seconds,
 # for a toolchain that cross-compiles perfectly well on its own.
-FROM --platform=$BUILDPLATFORM golang:1.26-alpine AS build
+FROM --platform=$BUILDPLATFORM golang:1.27-alpine AS build
 
 WORKDIR /src
 

@@ -66,7 +66,7 @@ services:
   # unformatted — and a named volume would be created root-owned and so
   # unwritable once the container drops to the calling user.
   lint:
-    image: golangci/golangci-lint:v2.12-alpine
+    image: golangci/golangci-lint:v2.15-alpine
     working_dir: /app
     environment:
       GOFLAGS: -buildvcs=false
