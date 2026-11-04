@@ -6,6 +6,10 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.8.0] — 2026-11-04
+
+No new features: the toolchain, the dependencies and the release tooling, brought up to date.
+
 ### Changed
 
 - **Go 1.27 is now required,** by the module and by the image's builder. This reaches past the
@@ -14,6 +18,12 @@ All notable changes to this project are documented here. The format follows
   OpenTelemetry 1.47, with their transitive updates.
 - **Tooling brought up to date:** golangci-lint 2.15, cosign 3.1.4, govulncheck 1.9.0 and
   cyclonedx-gomod 1.12.
+
+### Requirements
+
+- Go 1.27
+- PostgreSQL 13 or newer
+- RabbitMQ 3.8+ and/or Kafka 2.4+
 
 ## [1.7.0] — 2026-08-19
 
